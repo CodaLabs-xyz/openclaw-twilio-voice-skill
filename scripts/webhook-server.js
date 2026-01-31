@@ -476,6 +476,18 @@ const routes = {
     
     const agentResponse = await processWithAgent(speech, state);
     
+    // Check if response needs retry (first timeout occurred)
+    if (agentResponse && agentResponse.needsRetry) {
+      logCall('agent_needs_retry', { message: speech.substring(0, 50) });
+      
+      // Say "processing" and redirect to retry endpoint
+      const processingMsg = escapeXml(agentResponse.message);
+      return twiml(`
+        <Say voice="${voice}" language="${langCode}">${processingMsg}</Say>
+        <Redirect method="POST">/voice/retry-query</Redirect>
+      `);
+    }
+    
     logCall('agent_response', { callerNumber, response: agentResponse });
     
     // Clean markdown, escape XML, and truncate long responses
@@ -492,6 +504,138 @@ const routes = {
     
     return twiml(`
       <Say voice="${voice}" language="${langCode}">${safeResponse}</Say>
+      <Gather input="speech" speechTimeout="3" timeout="15" action="/voice/process-speech" method="POST" language="${langCode}">
+        <Pause length="1"/>
+      </Gather>
+      <Say voice="${voice}" language="${langCode}">${lang === 'es' ? 'No escuché nada. Adiós.' : 'No input received. Goodbye.'}</Say>
+      <Hangup/>
+    `);
+  },
+
+  'POST /voice/retry-query': async (req, body) => {
+    const { CallSid: callSid, From: callerNumber } = body;
+    const state = callState.get(callSid);
+    
+    if (!state) {
+      return twiml(`<Say voice="alice">Session error. Goodbye.</Say><Hangup/>`);
+    }
+    
+    const lang = state.lang || 'en';
+    const voiceConfig = config.voices || { es: 'Polly.Andres-Neural', en: 'Polly.Matthew-Neural' };
+    const voice = voiceConfig[lang];
+    const langCode = lang === 'es' ? 'es-US' : 'en-US';
+    
+    // Attempt retry
+    const result = await retryWithAgent(state);
+    
+    if (result.success && result.reply) {
+      // Got response on retry
+      const safeResponse = escapeXml(cleanForTTS(result.reply)).substring(0, 1000);
+      return twiml(`
+        <Say voice="${voice}" language="${langCode}">${safeResponse}</Say>
+        <Gather input="speech" speechTimeout="3" timeout="15" action="/voice/process-speech" method="POST" language="${langCode}">
+          <Pause length="1"/>
+        </Gather>
+        <Say voice="${voice}" language="${langCode}">${lang === 'es' ? 'No escuché nada. Adiós.' : 'No input received. Goodbye.'}</Say>
+        <Hangup/>
+      `);
+    }
+    
+    // Retry also timed out - offer to queue as job
+    logCall('agent_retry_timeout', { callSid });
+    
+    const offerMsg = lang === 'es'
+      ? 'Está tomando más tiempo del esperado. ¿Quieres que lo guarde como tarea y te envíe la respuesta por mensaje? Presiona 1 para sí, o 2 para continuar con otra pregunta.'
+      : 'This is taking longer than expected. Want me to save it as a task and send you the answer via message? Press 1 for yes, or 2 to continue with another question.';
+    
+    return twiml(`
+      <Gather input="dtmf" numDigits="1" action="/voice/queue-decision" method="POST" timeout="10">
+        <Say voice="${voice}" language="${langCode}">${offerMsg}</Say>
+      </Gather>
+      <Say voice="${voice}" language="${langCode}">${lang === 'es' ? 'No recibí respuesta. Continuemos.' : 'No response received. Let us continue.'}</Say>
+      <Redirect method="POST">/voice/continue-conversation</Redirect>
+    `);
+  },
+
+  'POST /voice/queue-decision': async (req, body) => {
+    const { Digits: digit, CallSid: callSid } = body;
+    const state = callState.get(callSid);
+    
+    if (!state) {
+      return twiml(`<Say voice="alice">Session error. Goodbye.</Say><Hangup/>`);
+    }
+    
+    const lang = state.lang || 'en';
+    const voiceConfig = config.voices || { es: 'Polly.Andres-Neural', en: 'Polly.Matthew-Neural' };
+    const voice = voiceConfig[lang];
+    const langCode = lang === 'es' ? 'es-US' : 'en-US';
+    
+    if (digit === '1' && state.pendingQuery) {
+      // User wants to queue the task
+      const queued = queueForAsyncProcessing({
+        message: state.pendingQuery.message,
+        lang: state.lang,
+        callerNumber: state.callerNumber,
+        callerName: state.name,
+        chatId: config.asyncResponse?.telegram?.chatId || config.telegram?.defaultChatId
+      });
+      
+      delete state.pendingQuery;
+      
+      const confirmMsg = lang === 'es'
+        ? 'Perfecto, lo guardé como tarea. Te llegará la respuesta por mensaje. ¿En qué más te puedo ayudar?'
+        : 'Perfect, I saved it as a task. You will receive the answer via message. What else can I help you with?';
+      
+      logCall('query_queued_by_user', { callSid });
+      
+      return twiml(`
+        <Say voice="${voice}" language="${langCode}">${confirmMsg}</Say>
+        <Gather input="speech" speechTimeout="3" timeout="15" action="/voice/process-speech" method="POST" language="${langCode}">
+          <Pause length="1"/>
+        </Gather>
+        <Say voice="${voice}" language="${langCode}">${lang === 'es' ? 'No escuché nada. Adiós.' : 'No input received. Goodbye.'}</Say>
+        <Hangup/>
+      `);
+    }
+    
+    // User pressed 2 or other - continue without queueing
+    delete state.pendingQuery;
+    
+    const continueMsg = lang === 'es'
+      ? 'De acuerdo. ¿En qué más te puedo ayudar?'
+      : 'Okay. What else can I help you with?';
+    
+    return twiml(`
+      <Say voice="${voice}" language="${langCode}">${continueMsg}</Say>
+      <Gather input="speech" speechTimeout="3" timeout="15" action="/voice/process-speech" method="POST" language="${langCode}">
+        <Pause length="1"/>
+      </Gather>
+      <Say voice="${voice}" language="${langCode}">${lang === 'es' ? 'No escuché nada. Adiós.' : 'No input received. Goodbye.'}</Say>
+      <Hangup/>
+    `);
+  },
+
+  'POST /voice/continue-conversation': async (req, body) => {
+    const { CallSid: callSid } = body;
+    const state = callState.get(callSid);
+    
+    if (!state) {
+      return twiml(`<Say voice="alice">Session error. Goodbye.</Say><Hangup/>`);
+    }
+    
+    const lang = state.lang || 'en';
+    const voiceConfig = config.voices || { es: 'Polly.Andres-Neural', en: 'Polly.Matthew-Neural' };
+    const voice = voiceConfig[lang];
+    const langCode = lang === 'es' ? 'es-US' : 'en-US';
+    
+    delete state.pendingQuery;
+    
+    const continueMsg = lang === 'es'
+      ? '¿En qué más te puedo ayudar?'
+      : 'What else can I help you with?';
+    
+    return twiml(`
+      <Say voice="${voice}" language="${langCode}">${continueMsg}</Say>
       <Gather input="speech" speechTimeout="3" timeout="15" action="/voice/process-speech" method="POST" language="${langCode}">
         <Pause length="1"/>
       </Gather>
@@ -581,66 +725,50 @@ const routes = {
   }
 };
 
-// Direct Groq API for fast voice responses with retry and fallback to queue
+// Process with Gateway (tools enabled) with timeout handling
 async function processWithAgent(userMessage, state) {
-  const groqApiKey = process.env.GROQ_API_KEY;
-  const FIRST_TIMEOUT_MS = 5000;  // First attempt: 5 seconds
-  const SECOND_TIMEOUT_MS = 5000; // Retry: 5 more seconds
+  const gatewayUrl = config.agent?.gatewayUrl || 'http://localhost:18789';
+  const gatewayToken = config.agent?.gatewayToken;
+  const FIRST_TIMEOUT_MS = 6000;  // First attempt: 6 seconds
+  const SECOND_TIMEOUT_MS = 6000; // Retry: 6 more seconds
   
-  if (!groqApiKey) {
-    logCall('agent_error', { error: 'GROQ_API_KEY not configured' });
-    return state.lang === 'es' 
+  const lang = state.lang || 'en';
+  
+  if (!gatewayToken) {
+    logCall('agent_error', { error: 'Gateway token not configured' });
+    return lang === 'es' 
       ? "El agente no está configurado."
       : "The agent is not configured.";
   }
   
-  const lang = state.lang || 'en';
-  const noAccessMsg = lang === 'es' 
-    ? 'No tengo acceso a eso por voz. Si quieres, lo guardo como tarea y te envío el resultado por mensaje de texto.'
-    : 'I cannot access that via voice. If you want, I can save it as a task and send you the result via text message.';
-  
-  const systemPrompt = `You are Winston Scott, a calm AI assistant on a VOICE CALL with ${state.name}.
-Current time: ${new Date().toLocaleString('en-US', { timeZone: 'America/New_York' })}.
+  const systemPrompt = `You are Winston Scott, a professional AI assistant on a VOICE CALL with ${state.name}.
+Time: ${new Date().toLocaleString('en-US', { timeZone: 'America/New_York' })}.
 
-STRICT RULES:
+VOICE CALL RULES:
 1. Respond ONLY in ${lang === 'es' ? 'SPANISH' : 'ENGLISH'}
-2. Keep responses under 30 words - this is voice, be brief
-3. NO markdown, NO lists, NO bullet points
-4. NEVER make up data, dates, numbers, or facts
-5. NEVER say you will "call back" or "call later" - you CANNOT make calls
-6. NEVER say you will "check now" or "verify now" for external data - you CANNOT access external systems
+2. Keep responses under 50 words - this is voice
+3. NO markdown, NO lists, NO formatting
+4. Be conversational and natural
+5. NEVER say you will "call back" - you cannot make calls
 
-WHAT YOU CANNOT DO (be honest about this):
-- Access weather, news, prices, or real-time data
-- Read files, logs, databases, or Google Sheets
-- Check cron jobs, calendars, or schedules
-- Make outbound calls
+You have access to tools and can look up information. Use them when needed.`;
 
-WHAT TO SAY when asked about things you cannot access:
-"${noAccessMsg}"
-
-If user agrees to receive via text, say: "${lang === 'es' ? 'Perfecto, lo guardo como tarea. Te llegará por mensaje.' : 'Perfect, saving as a task. You will receive it via message.'}"
-If user insists on getting info now, say: "${lang === 'es' ? 'Lo siento, por voz no puedo acceder a eso. Solo puedo guardarlo como tarea para enviarte después.' : 'Sorry, I cannot access that via voice. I can only save it as a task to send you later.'}"
-
-Be friendly but honest about your limitations.`;
-
-  // Helper function to call Groq with timeout
-  async function callGroq(timeoutMs) {
+  // Helper function to call Gateway with timeout
+  async function callGateway(timeoutMs) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     
     try {
-      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      const response = await fetch(`${gatewayUrl}/v1/chat/completions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${groqApiKey}`
+          'Authorization': `Bearer ${gatewayToken}`
         },
         signal: controller.signal,
         body: JSON.stringify({
-          model: 'llama-3.3-70b-versatile',
-          max_tokens: 150,
-          temperature: 0.7,
+          model: 'groq/llama-3.3-70b-versatile',
+          max_tokens: 200,
           messages: [
             { role: 'system', content: systemPrompt },
             { role: 'user', content: userMessage }
@@ -667,57 +795,95 @@ Be friendly but honest about your limitations.`;
   
   logCall('agent_request', { message: userMessage, name: state.name });
   
-  // FIRST ATTEMPT (5 seconds)
+  // FIRST ATTEMPT
   logCall('agent_attempt', { attempt: 1, timeout: FIRST_TIMEOUT_MS });
-  let result = await callGroq(FIRST_TIMEOUT_MS);
+  let result = await callGateway(FIRST_TIMEOUT_MS);
   
   if (result.success && result.reply) {
     logCall('agent_response', { attempt: 1, response: result.reply.substring(0, 100) });
     return result.reply;
   }
   
-  // First attempt timed out - tell user to wait
+  // First timeout - mark state and return "processing" message
   if (result.timeout) {
     logCall('agent_first_timeout', { message: userMessage.substring(0, 50) });
     
-    // Return "please wait" message - Twilio will speak this
-    // But we need to continue processing... This is tricky with TwiML
-    // Instead, we'll do retry inline and only queue if both fail
-    
-    // SECOND ATTEMPT (5 more seconds)
-    logCall('agent_attempt', { attempt: 2, timeout: SECOND_TIMEOUT_MS });
-    result = await callGroq(SECOND_TIMEOUT_MS);
-    
-    if (result.success && result.reply) {
-      logCall('agent_response', { attempt: 2, response: result.reply.substring(0, 100) });
-      // Prepend a brief apology for the wait
-      const prefix = state.lang === 'es' ? 'Disculpa la espera. ' : 'Sorry for the wait. ';
-      return prefix + result.reply;
-    }
-    
-    // Both attempts failed - queue for async processing
-    logCall('agent_queue_fallback', { message: userMessage.substring(0, 50) });
-    
-    const queued = queueForAsyncProcessing({
+    // Store pending query in state for potential queueing
+    state.pendingQuery = {
       message: userMessage,
-      lang: state.lang,
-      callerNumber: state.callerNumber,
-      callerName: state.name,
-      chatId: config.asyncResponse?.telegram?.chatId || config.telegram?.defaultChatId
-    });
+      timestamp: Date.now()
+    };
     
-    if (queued) {
-      return state.lang === 'es'
-        ? "Esa pregunta está tomando más tiempo del esperado. Te envío la respuesta por mensaje de texto en unos minutos."
-        : "That question is taking longer than expected. I'll send you the answer via text message in a few minutes.";
-    }
+    // Return processing message - will trigger second attempt via TwiML
+    return { 
+      needsRetry: true, 
+      message: lang === 'es' 
+        ? "Estoy procesando tu solicitud, por favor espera un momento."
+        : "I'm processing your request, please wait a moment."
+    };
   }
   
   // Non-timeout error
   logCall('agent_error', { error: result.error });
-  return state.lang === 'es'
-    ? "Lo siento, hubo un error. Intenta más tarde."
-    : "Sorry, there was an error. Try again later.";
+  return lang === 'es'
+    ? "Lo siento, hubo un error. Intenta de nuevo."
+    : "Sorry, there was an error. Try again.";
+}
+
+// Second attempt after "processing" message
+async function retryWithAgent(state) {
+  const gatewayUrl = config.agent?.gatewayUrl || 'http://localhost:18789';
+  const gatewayToken = config.agent?.gatewayToken;
+  const RETRY_TIMEOUT_MS = 6000;
+  const lang = state.lang || 'en';
+  
+  if (!state.pendingQuery) {
+    return { success: false };
+  }
+  
+  const systemPrompt = `You are Winston Scott on a VOICE CALL with ${state.name}.
+Respond ONLY in ${lang === 'es' ? 'SPANISH' : 'ENGLISH'}. Under 50 words. No markdown.`;
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), RETRY_TIMEOUT_MS);
+  
+  try {
+    logCall('agent_retry', { message: state.pendingQuery.message.substring(0, 50) });
+    
+    const response = await fetch(`${gatewayUrl}/v1/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${gatewayToken}`
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: 'groq/llama-3.3-70b-versatile',
+        max_tokens: 200,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: state.pendingQuery.message }
+        ]
+      })
+    });
+    
+    clearTimeout(timeoutId);
+    
+    if (response.ok) {
+      const data = await response.json();
+      const reply = data.choices?.[0]?.message?.content;
+      if (reply) {
+        logCall('agent_retry_success', { response: reply.substring(0, 100) });
+        delete state.pendingQuery;
+        return { success: true, reply };
+      }
+    }
+    return { success: false, timeout: false };
+  } catch (error) {
+    clearTimeout(timeoutId);
+    logCall('agent_retry_failed', { error: error.message });
+    return { success: false, timeout: error.name === 'AbortError' };
+  }
 }
 
 // Server
