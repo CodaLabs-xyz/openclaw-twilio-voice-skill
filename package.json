@@ -5,7 +5,10 @@
   "main": "scripts/webhook-server.js",
   "scripts": {
     "start": "node scripts/webhook-server.js",
-    "dev": "node --watch scripts/webhook-server.js"
+    "dev": "node --watch scripts/webhook-server.js",
+    "worker": "node scripts/queue-worker.js",
+    "verify": "node scripts/verify-config.js",
+    "test": "node scripts/test-server.js"
   },
   "keywords": [
     "twilio",

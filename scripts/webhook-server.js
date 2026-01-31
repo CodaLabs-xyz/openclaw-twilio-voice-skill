@@ -20,7 +20,7 @@ let config = {
   rateLimitPerHour: 5,
   ttsProvider: 'elevenlabs',
   sttProvider: 'groq',
-  port: process.env.PORT || 3001
+  port: 3001
 };
 
 try {
@@ -914,8 +914,9 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(config.port, () => {
-  console.log(`Twilio Voice Webhook Server running on port ${config.port}`);
+const PORT = process.env.PORT || config.port || 3001;
+server.listen(PORT, () => {
+  console.log(`Twilio Voice Webhook Server running on port ${PORT}`);
   console.log(`Allowed numbers: ${config.allowedNumbers.length}`);
   console.log(`Voice notes dir: ${config.voiceNotes?.saveDir || './voice-notes'}`);
   console.log(`Endpoints:`);
