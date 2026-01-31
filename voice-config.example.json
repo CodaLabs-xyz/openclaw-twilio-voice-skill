@@ -3,14 +3,16 @@
     {
       "number": "+1234567890",
       "pin": "1234",
-      "name": "Julio"
+      "name": "User"
     }
   ],
   "maxAttempts": 3,
   "rateLimitPerHour": 5,
-  "ttsProvider": "elevenlabs",
-  "sttProvider": "groq",
   "port": 3001,
+  "voices": {
+    "es": "Polly.Lupe",
+    "en": "Polly.Joanna"
+  },
   "twilio": {
     "accountSid": "ACxxxxxxxxxx",
     "authToken": "your_auth_token",

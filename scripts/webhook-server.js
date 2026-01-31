@@ -144,18 +144,15 @@ const routes = {
     if (enteredPin === correctPin) {
       logCall('authenticated', { callerNumber, name: state.name });
       
-      // Connected - start conversation (bilingual ES/EN)
+      // Language selection menu
       return twiml(`
-        <Say voice="alice" language="es-US">Bienvenido ${state.name}. Estás conectado. Puedes hablar en español o inglés.</Say>
-        <Gather input="speech" speechTimeout="auto" timeout="15" action="/voice/process-speech" method="POST" language="es-US" hints="hola,ayuda,gracias,adiós,hello,help,thanks,goodbye">
-          <Say voice="alice" language="es-US">Te escucho.</Say>
+        <Gather input="dtmf" numDigits="1" action="/voice/select-language" method="POST" timeout="10">
+          <Say voice="Polly.Lupe" language="es-US">Para español, presione uno.</Say>
+          <Pause length="1"/>
+          <Say voice="Polly.Joanna" language="en-US">For English, press two.</Say>
         </Gather>
-        <Say voice="alice" language="es-US">No escuché nada. Intenta de nuevo.</Say>
-        <Gather input="speech" speechTimeout="auto" timeout="15" action="/voice/process-speech" method="POST" language="es-US" hints="hola,ayuda,gracias,adiós,hello,help,thanks,goodbye">
-          <Say voice="alice" language="es-US">Por favor di algo.</Say>
-        </Gather>
-        <Say voice="alice" language="es-US">Sin respuesta. Adiós.</Say>
-        <Hangup/>
+        <Say voice="alice">No selection made. Defaulting to English.</Say>
+        <Redirect method="POST">/voice/start-conversation?lang=en</Redirect>
       `);
     }
     
@@ -181,6 +178,36 @@ const routes = {
     `);
   },
 
+  'POST /voice/select-language': async (req, body) => {
+    const { Digits: digit, CallSid: callSid } = body;
+    const state = callState.get(callSid);
+    
+    if (!state) {
+      return twiml(`<Say voice="alice">Session error. Goodbye.</Say><Hangup/>`);
+    }
+    
+    // Set language based on selection
+    state.lang = digit === '1' ? 'es' : 'en';
+    logCall('language_selected', { lang: state.lang, name: state.name });
+    
+    const voiceConfig = config.voices || { es: 'Polly.Lupe', en: 'Polly.Joanna' };
+    const voice = voiceConfig[state.lang];
+    const langCode = state.lang === 'es' ? 'es-US' : 'en-US';
+    
+    const welcomeMsg = state.lang === 'es' 
+      ? `Bienvenido ${state.name}. Estás conectado. ¿En qué puedo ayudarte?`
+      : `Welcome ${state.name}. You are connected. How can I help you?`;
+    
+    return twiml(`
+      <Say voice="${voice}" language="${langCode}">${welcomeMsg}</Say>
+      <Gather input="speech" speechTimeout="auto" timeout="15" action="/voice/process-speech" method="POST" language="${langCode}">
+        <Pause length="1"/>
+      </Gather>
+      <Say voice="${voice}" language="${langCode}">${state.lang === 'es' ? 'No escuché nada. Adiós.' : 'No input received. Goodbye.'}</Say>
+      <Hangup/>
+    `);
+  },
+
   'POST /voice/process-speech': async (req, body) => {
     const { SpeechResult: speech, CallSid: callSid, From: callerNumber } = body;
     const state = callState.get(callSid);
@@ -189,10 +216,13 @@ const routes = {
       return twiml(`<Say voice="alice">Session error. Goodbye.</Say><Hangup/>`);
     }
     
-    logCall('speech_input', { callerNumber, speech });
+    const lang = state.lang || 'en';
+    const voiceConfig = config.voices || { es: 'Polly.Lupe', en: 'Polly.Joanna' };
+    const voice = voiceConfig[lang];
+    const langCode = lang === 'es' ? 'es-US' : 'en-US';
     
-    // TODO: Send to agent and get response
-    // For now, echo back
+    logCall('speech_input', { callerNumber, speech, lang });
+    
     const agentResponse = await processWithAgent(speech, state);
     
     logCall('agent_response', { callerNumber, response: agentResponse });
@@ -201,17 +231,17 @@ const routes = {
     if (speech?.toLowerCase().match(/goodbye|bye|adiós|adios|chao|hasta luego/)) {
       callState.delete(callSid);
       return twiml(`
-        <Say voice="alice" language="es-US">${agentResponse}</Say>
+        <Say voice="${voice}" language="${langCode}">${agentResponse}</Say>
         <Hangup/>
       `);
     }
     
     return twiml(`
-      <Say voice="alice" language="es-US">${agentResponse}</Say>
-      <Gather input="speech" speechTimeout="auto" timeout="15" action="/voice/process-speech" method="POST" language="es-US" hints="hola,ayuda,gracias,adiós,hello,help,thanks,goodbye">
+      <Say voice="${voice}" language="${langCode}">${agentResponse}</Say>
+      <Gather input="speech" speechTimeout="auto" timeout="15" action="/voice/process-speech" method="POST" language="${langCode}">
         <Pause length="1"/>
       </Gather>
-      <Say voice="alice" language="es-US">No escuché nada. Adiós.</Say>
+      <Say voice="${voice}" language="${langCode}">${lang === 'es' ? 'No escuché nada. Adiós.' : 'No input received. Goodbye.'}</Say>
       <Hangup/>
     `);
   },
@@ -250,7 +280,7 @@ async function processWithAgent(userMessage, state) {
             content: `You are Winston, a helpful AI assistant. You're receiving a voice call from ${state.name}. 
 Keep responses concise and conversational (under 100 words) since this will be read aloud via text-to-speech.
 Be friendly, helpful, and natural. Don't use markdown or special formatting.
-IMPORTANT: Respond in the same language the user speaks. If they speak Spanish, respond in Spanish. If English, respond in English.`
+IMPORTANT: The user selected ${state.lang === 'es' ? 'SPANISH' : 'ENGLISH'}. Always respond in ${state.lang === 'es' ? 'Spanish' : 'English'}.`
           },
           { role: 'user', content: userMessage }
         ]
