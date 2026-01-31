@@ -33,9 +33,25 @@
     "authToken": "your_auth_token",
     "phoneNumber": "+1234567890"
   },
-  "telegram": {
-    "botToken": "env:TELEGRAM_BOT_TOKEN",
-    "defaultChatId": "your_telegram_user_id"
+  "asyncResponse": {
+    "method": "gateway",
+    "gateway": {
+      "url": "http://localhost:18789",
+      "token": "your_gateway_token"
+    },
+    "telegram": {
+      "botToken": "your_bot_token",
+      "chatId": "your_chat_id"
+    },
+    "sms": {
+      "to": "+1234567890"
+    },
+    "webhook": {
+      "url": "https://your-server.com/voice-callback",
+      "headers": {
+        "Authorization": "Bearer your_token"
+      }
+    }
   },
   "queueWorker": {
     "pollInterval": 30000

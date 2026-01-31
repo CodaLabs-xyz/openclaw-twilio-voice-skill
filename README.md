@@ -23,7 +23,6 @@ graph TB
     subgraph External["External"]
         Phone["📱 Phone Call"]
         Twilio["☁️ Twilio"]
-        Telegram["📱 Telegram"]
     end
     
     subgraph Server["Webhook Server :3001"]
@@ -43,12 +42,19 @@ graph TB
     subgraph Async["Async Path (Queue Worker)"]
         Queue["📋 pending-queries.jsonl"]
         Worker["⚙️ queue-worker.js"]
-        GroqAsync["🤖 Groq + Tools"]
+        GroqAsync["🤖 Groq LLM"]
     end
     
     subgraph Voice["Twilio Voice Pipeline"]
         STT["📝 STT (Twilio)"]
         TTS["🔊 TTS (Polly Neural)"]
+    end
+    
+    subgraph Channels["Response Channels"]
+        Gateway["🚪 Clawdbot Gateway"]
+        TelegramBot["📱 Telegram"]
+        SMS["💬 SMS"]
+        WebhookOut["🔗 Webhook"]
     end
     
     Phone --> Twilio
@@ -67,13 +73,19 @@ graph TB
     Twilio --> Phone
     Queue --> Worker
     Worker --> GroqAsync
-    GroqAsync --> Telegram
+    GroqAsync --> Gateway
+    GroqAsync --> TelegramBot
+    GroqAsync --> SMS
+    GroqAsync --> WebhookOut
     
     style Phone fill:#e1f5fe
     style Twilio fill:#fff3e0
     style GroqFast fill:#c8e6c9
     style Queue fill:#fff9c4
-    style Telegram fill:#bbdefb
+    style Gateway fill:#e1bee7
+    style TelegramBot fill:#bbdefb
+    style SMS fill:#c8e6c9
+    style WebhookOut fill:#ffe0b2
 ```
 
 ## 🔄 Call Flow Sequence
@@ -448,8 +460,12 @@ graph LR
     C --> D["🔊 Instant Response"]
     B -->|Complex| E["📝 Queue"]
     E --> F["⏳ Queue Worker"]
-    F --> G["🤖 Process with Tools"]
-    G --> H["📱 Telegram Response"]
+    F --> G["🤖 Process Query"]
+    G --> H{"Response Method"}
+    H -->|gateway| I["🚪 Clawdbot"]
+    H -->|telegram| J["📱 Telegram"]
+    H -->|sms| K["💬 SMS"]
+    H -->|webhook| L["🔗 Custom URL"]
 ```
 
 ### Query Classification
@@ -467,13 +483,26 @@ graph LR
 
 ### Configuration
 
-Add Telegram settings to `voice-config.json`:
+Configure your preferred response channel in `voice-config.json`:
 
 ```json
 {
-  "telegram": {
-    "botToken": "env:TELEGRAM_BOT_TOKEN",
-    "defaultChatId": "YOUR_TELEGRAM_USER_ID"
+  "asyncResponse": {
+    "method": "gateway",
+    "gateway": {
+      "url": "http://localhost:18789",
+      "token": "your_gateway_token"
+    },
+    "telegram": {
+      "botToken": "your_bot_token",
+      "chatId": "your_chat_id"
+    },
+    "sms": {
+      "to": "+1234567890"
+    },
+    "webhook": {
+      "url": "https://your-server.com/callback"
+    }
   },
   "queueWorker": {
     "pollInterval": 30000
@@ -481,10 +510,16 @@ Add Telegram settings to `voice-config.json`:
 }
 ```
 
-Set environment variable:
-```bash
-export TELEGRAM_BOT_TOKEN="your_bot_token"
-```
+### Response Methods
+
+| Method | Description | Best For |
+|--------|-------------|----------|
+| `gateway` | Uses Clawdbot Gateway (routes to user's configured channel) | Clawdbot users with any channel |
+| `telegram` | Direct Telegram Bot API | Standalone Telegram bots |
+| `sms` | Twilio SMS to caller's phone | Simple text responses |
+| `webhook` | POST to custom URL | Custom integrations |
+
+**Recommended:** Use `gateway` if running with Clawdbot - it automatically routes to whatever channel the user has configured (Telegram, WhatsApp, Discord, Signal, etc.).
 
 ### Queue Worker
 
