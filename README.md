@@ -10,9 +10,11 @@ Enable AI agents to receive and handle phone calls with multi-layer security ver
 - 🔐 **Caller ID Verification** - Allowlist-based access control
 - 🔢 **PIN Authentication** - 4-6 digit verification
 - 🎤 **Speech-to-Text** - Convert caller speech to text (Whisper/Groq)
-- 🔊 **Text-to-Speech** - Agent responses via voice (ElevenLabs/OpenAI)
+- 🔊 **Text-to-Speech** - Agent responses via voice (Polly Neural)
 - 📊 **Call Logging** - Full audit trail
 - ⏱️ **Rate Limiting** - Prevent abuse
+- 🔄 **Async Query Processing** - Complex queries queued and answered via Telegram
+- 📝 **Voice Notes** - Leave recorded messages with auto-transcription
 
 ## 🏗️ Architecture
 
@@ -21,6 +23,7 @@ graph TB
     subgraph External["External"]
         Phone["📱 Phone Call"]
         Twilio["☁️ Twilio"]
+        Telegram["📱 Telegram"]
     end
     
     subgraph Server["Webhook Server :3001"]
@@ -30,47 +33,47 @@ graph TB
         Menu["🌍 Language Menu"]
         Speech["🎤 Speech Handler"]
         VoiceNote["📝 Voice Note"]
+        Detect["🔍 Query Detector"]
     end
     
-    subgraph Agent["Clawdbot Gateway :18789"]
-        Gateway["🚪 /v1/chat/completions"]
-        LLM["🧠 Groq LLaMA 3.3"]
+    subgraph Fast["Fast Path (Groq Direct)"]
+        GroqFast["🚀 Groq API"]
+    end
+    
+    subgraph Async["Async Path (Queue Worker)"]
+        Queue["📋 pending-queries.jsonl"]
+        Worker["⚙️ queue-worker.js"]
+        GroqAsync["🤖 Groq + Tools"]
     end
     
     subgraph Voice["Twilio Voice Pipeline"]
-        STT["📝 STT (Twilio built-in)"]
+        STT["📝 STT (Twilio)"]
         TTS["🔊 TTS (Polly Neural)"]
-    end
-    
-    subgraph Storage["Local Storage"]
-        Notes["📁 voice-notes/"]
-        Transcribe["🎯 Groq Whisper"]
     end
     
     Phone --> Twilio
     Twilio --> Webhook
     Webhook --> Auth
-    Auth -->|Blocked| Twilio
     Auth -->|Allowed| PIN
-    PIN -->|Invalid| Twilio
     PIN -->|Valid| Menu
     Menu -->|1,2| Speech
     Menu -->|9| VoiceNote
-    VoiceNote --> Notes
-    Notes --> Transcribe
     Speech --> STT
-    STT --> Gateway
-    Gateway --> LLM
-    LLM --> TTS
+    STT --> Detect
+    Detect -->|Simple| GroqFast
+    Detect -->|Complex| Queue
+    GroqFast --> TTS
     TTS --> Twilio
     Twilio --> Phone
+    Queue --> Worker
+    Worker --> GroqAsync
+    GroqAsync --> Telegram
     
     style Phone fill:#e1f5fe
     style Twilio fill:#fff3e0
-    style Auth fill:#ffebee
-    style LLM fill:#e8f5e9
-    style Menu fill:#e3f2fd
-    style VoiceNote fill:#f3e5f5
+    style GroqFast fill:#c8e6c9
+    style Queue fill:#fff9c4
+    style Telegram fill:#bbdefb
 ```
 
 ## 🔄 Call Flow Sequence
@@ -432,6 +435,89 @@ The agent can process voice notes via heartbeat or cron:
 5. **Update status** to `processed`
 6. **Notify user** via Telegram/SMS
 
+## 🔄 Async Query Processing (Telegram Follow-up)
+
+Complex queries (weather, tasks, searches) can't be processed in real-time due to Twilio's ~15 second timeout. The skill automatically detects these queries and processes them asynchronously, sending results via Telegram.
+
+### How It Works
+
+```mermaid
+graph LR
+    A["📞 Voice Call"] --> B{"Query Type?"}
+    B -->|Simple| C["🚀 Groq Direct"]
+    C --> D["🔊 Instant Response"]
+    B -->|Complex| E["📝 Queue"]
+    E --> F["⏳ Queue Worker"]
+    F --> G["🤖 Process with Tools"]
+    G --> H["📱 Telegram Response"]
+```
+
+### Query Classification
+
+**Simple queries (instant response):**
+- "What's your name?"
+- "What time is it?"
+- "Tell me about yourself"
+
+**Complex queries (queued for Telegram):**
+- Weather: "What's the weather in Virginia?"
+- Tasks: "Run the research cron job"
+- Search: "Find news about Bitcoin"
+- Calendar: "What events do I have today?"
+
+### Configuration
+
+Add Telegram settings to `voice-config.json`:
+
+```json
+{
+  "telegram": {
+    "botToken": "env:TELEGRAM_BOT_TOKEN",
+    "defaultChatId": "YOUR_TELEGRAM_USER_ID"
+  },
+  "queueWorker": {
+    "pollInterval": 30000
+  }
+}
+```
+
+Set environment variable:
+```bash
+export TELEGRAM_BOT_TOKEN="your_bot_token"
+```
+
+### Queue Worker
+
+The queue worker processes pending queries every 30 seconds (configurable):
+
+```bash
+# Start with pm2 (recommended)
+pm2 start ecosystem.config.js
+
+# Or manually
+node scripts/queue-worker.js
+```
+
+### Files
+
+| File | Description |
+|------|-------------|
+| `pending-queries.jsonl` | Queue of queries awaiting processing |
+| `processed-queries.jsonl` | Archive of processed queries |
+| `scripts/queue-worker.js` | Worker that processes the queue |
+
+### Example Flow
+
+1. **Voice call:**
+   > You: "What's the weather in Fairfax?"
+   > Winston: "That question needs more time. I'll send you the answer via Telegram in a few minutes."
+
+2. **Telegram (30 seconds later):**
+   > 📞 **Response to your voice query:**
+   > _"What's the weather in Fairfax?"_
+   >
+   > The current weather in Fairfax, Virginia is 6°F and sunny with light winds from the north at 6 mph. Bundle up if you're heading out!
+
 ## 🗣️ Voice Configuration
 
 The skill supports multiple TTS voices from Amazon Polly and Google. Configure voices per language in `voice-config.json`:
@@ -544,9 +630,16 @@ openclaw-twilio-voice-skill/
 ├── README.md                   # This file
 ├── LICENSE                     # MIT License
 ├── package.json
+├── ecosystem.config.js         # PM2 configuration (all services)
+├── voice-config.json           # Your configuration (gitignored)
 ├── voice-config.example.json   # Example configuration
+├── pending-queries.jsonl       # Queue for async processing
+├── processed-queries.jsonl     # Archive of processed queries
 ├── scripts/
-│   └── webhook-server.js       # Main webhook server
+│   ├── webhook-server.js       # Main webhook server
+│   └── queue-worker.js         # Async query processor
+├── voice-notes/                # Recorded voice messages
+│   └── notes.jsonl             # Voice note metadata
 └── references/
     ├── twilio-api.md           # Twilio API reference
     └── twiml-patterns.md       # TwiML examples

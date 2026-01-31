@@ -35,6 +35,46 @@ try {
 const callState = new Map(); // callSid -> { attempts, startTime, callerNumber }
 const rateLimits = new Map(); // phoneNumber -> { count, resetTime }
 
+// Queue for async processing
+const QUEUE_PATH = process.env.QUEUE_PATH || path.join(__dirname, '..', 'pending-queries.jsonl');
+
+// Patterns that indicate a query needs tools/async processing
+const COMPLEX_QUERY_PATTERNS = [
+  /clima|weather|temperatura|temperature/i,
+  /busca|search|encuentra|find|investigar/i,
+  /noticias|news/i,
+  /cron|tarea|task|job|ejecuta|run|schedule/i,
+  /email|correo|mensaje|message/i,
+  /precio|price|stock|crypto|bitcoin|eth/i,
+  /calendario|calendar|evento|event/i,
+  /recuerda|remind|recordatorio|reminder/i,
+];
+
+function isComplexQuery(message) {
+  return COMPLEX_QUERY_PATTERNS.some(pattern => pattern.test(message));
+}
+
+function queueForAsyncProcessing(query) {
+  try {
+    const entry = {
+      id: Date.now().toString(36) + Math.random().toString(36).substr(2, 5),
+      message: query.message,
+      lang: query.lang,
+      callerNumber: query.callerNumber,
+      callerName: query.callerName,
+      chatId: query.chatId || config.telegram?.defaultChatId,
+      timestamp: new Date().toISOString()
+    };
+    
+    fs.appendFileSync(QUEUE_PATH, JSON.stringify(entry) + '\n');
+    logCall('query_queued', { id: entry.id, message: entry.message.substring(0, 50) });
+    return true;
+  } catch (error) {
+    logCall('queue_error', { error: error.message });
+    return false;
+  }
+}
+
 // Helpers
 function parseBody(req) {
   return new Promise((resolve, reject) => {
@@ -443,6 +483,26 @@ async function processWithAgent(userMessage, state) {
       : "The agent is not configured.";
   }
   
+  // Check if this is a complex query that needs async processing
+  if (isComplexQuery(userMessage)) {
+    logCall('complex_query_detected', { message: userMessage.substring(0, 50) });
+    
+    // Queue for async processing
+    const queued = queueForAsyncProcessing({
+      message: userMessage,
+      lang: state.lang,
+      callerNumber: state.callerNumber,
+      callerName: state.name,
+      chatId: config.telegram?.defaultChatId
+    });
+    
+    if (queued) {
+      return state.lang === 'es'
+        ? "Esa pregunta requiere más tiempo. Te envío la respuesta por Telegram en unos minutos."
+        : "That question needs more time. I'll send you the answer via Telegram in a few minutes.";
+    }
+  }
+  
   try {
     logCall('agent_request', { message: userMessage, name: state.name });
     
@@ -471,7 +531,6 @@ RULES:
 - Keep responses under 40 words (this is voice, not text)
 - Be conversational and natural
 - No markdown, no lists, no bullet points
-- If asked about real-time data (weather, stocks, news), say you don't have live access on voice calls but can check later via text
 - Respond ONLY in ${state.lang === 'es' ? 'SPANISH' : 'ENGLISH'}`
           },
           { role: 'user', content: userMessage }
