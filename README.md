@@ -292,6 +292,112 @@ curl http://localhost:3001/health
 # You should hear: "Welcome. Please enter your 6 digit PIN."
 ```
 
+## 📋 Menu Configuration
+
+The language menu is fully configurable via `voice-config.json`:
+
+```json
+{
+  "menu": {
+    "languages": [
+      { "key": "1", "lang": "es", "voice": "Polly.Lupe", "prompt": "Para español, presione uno." },
+      { "key": "2", "lang": "en", "voice": "Polly.Joanna", "prompt": "For English, press two." }
+    ],
+    "voiceNote": { 
+      "key": "9", 
+      "voice": "Polly.Joanna", 
+      "prompt": "To leave a voice note, press nine." 
+    }
+  }
+}
+```
+
+### Menu Options
+
+| Key | Action | Description |
+|-----|--------|-------------|
+| `1` | Spanish | Start conversation in Spanish |
+| `2` | English | Start conversation in English |
+| `9` | Voice Note | Record a voice message for later processing |
+
+### Customizing the Menu
+
+You can add/remove languages or change the voice note key:
+
+```json
+{
+  "menu": {
+    "languages": [
+      { "key": "1", "lang": "es", "voice": "Polly.Miguel", "prompt": "Para español, presione uno." },
+      { "key": "2", "lang": "en", "voice": "Polly.Matthew", "prompt": "For English, press two." },
+      { "key": "3", "lang": "pt", "voice": "Polly.Ricardo", "prompt": "Para português, pressione três." }
+    ],
+    "voiceNote": { 
+      "key": "0", 
+      "voice": "Polly.Matthew", 
+      "prompt": "To leave a message, press zero." 
+    }
+  }
+}
+```
+
+## 📝 Voice Notes
+
+Voice notes allow callers to leave recorded messages that are saved for later processing by the agent.
+
+### Configuration
+
+```json
+{
+  "voiceNotes": {
+    "saveDir": "./voice-notes",
+    "maxLengthSeconds": 120
+  }
+}
+```
+
+### Voice Note Workflow
+
+```mermaid
+graph LR
+    A["📞 Caller presses 9"] --> B["🎤 Record message"]
+    B --> C["💾 Save to voice-notes/"]
+    C --> D["📋 Append to notes.jsonl"]
+    D --> E["⏰ Agent processes later"]
+    E --> F["📱 Notify user of response"]
+```
+
+### Voice Notes Storage
+
+Voice notes are saved in two parts:
+
+1. **Recording URL** - Twilio-hosted audio file
+2. **Metadata** - Saved to `voice-notes/notes.jsonl`:
+
+```json
+{
+  "id": "RExxxxxxxxxx",
+  "callSid": "CAxxxxxxxxxx",
+  "caller": "+1234567890",
+  "name": "Julio",
+  "recordingUrl": "https://api.twilio.com/...",
+  "duration": 45,
+  "timestamp": "2026-01-31T06:50:00.000Z",
+  "status": "pending"
+}
+```
+
+### Processing Voice Notes (Agent Workflow)
+
+The agent can process voice notes via heartbeat or cron:
+
+1. **Read pending notes** from `voice-notes/notes.jsonl`
+2. **Download recording** from Twilio URL
+3. **Transcribe** using Whisper/Groq
+4. **Process** the transcription
+5. **Update status** to `processed`
+6. **Notify user** via Telegram/SMS
+
 ## 🗣️ Voice Configuration
 
 The skill supports multiple TTS voices from Amazon Polly and Google. Configure voices per language in `voice-config.json`:

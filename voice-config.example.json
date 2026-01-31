@@ -13,6 +13,21 @@
     "es": "Polly.Miguel",
     "en": "Polly.Matthew"
   },
+  "menu": {
+    "languages": [
+      { "key": "1", "lang": "es", "voice": "Polly.Lupe", "prompt": "Para español, presione uno." },
+      { "key": "2", "lang": "en", "voice": "Polly.Joanna", "prompt": "For English, press two." }
+    ],
+    "voiceNote": { 
+      "key": "9", 
+      "voice": "Polly.Joanna", 
+      "prompt": "To leave a voice note, press nine." 
+    }
+  },
+  "voiceNotes": {
+    "saveDir": "./voice-notes",
+    "maxLengthSeconds": 120
+  },
   "twilio": {
     "accountSid": "ACxxxxxxxxxx",
     "authToken": "your_auth_token",

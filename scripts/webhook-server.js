@@ -144,12 +144,27 @@ const routes = {
     if (enteredPin === correctPin) {
       logCall('authenticated', { callerNumber, name: state.name });
       
-      // Language selection menu
+      // Get menu config (configurable)
+      const menu = config.menu || {
+        languages: [
+          { key: '1', lang: 'es', voice: 'Polly.Lupe', prompt: 'Para español, presione uno.' },
+          { key: '2', lang: 'en', voice: 'Polly.Joanna', prompt: 'For English, press two.' }
+        ],
+        voiceNote: { key: '9', voice: 'Polly.Joanna', prompt: 'To leave a voice note, press nine.' }
+      };
+      
+      // Build menu TwiML
+      let menuPrompts = menu.languages.map(l => 
+        `<Say voice="${l.voice}" language="${l.lang === 'es' ? 'es-US' : 'en-US'}">${l.prompt}</Say><Pause length="1"/>`
+      ).join('\n');
+      
+      if (menu.voiceNote) {
+        menuPrompts += `\n<Say voice="${menu.voiceNote.voice}" language="en-US">${menu.voiceNote.prompt}</Say>`;
+      }
+      
       return twiml(`
         <Gather input="dtmf" numDigits="1" action="/voice/select-language" method="POST" timeout="10">
-          <Say voice="Polly.Lupe" language="es-US">Para español, presione uno.</Say>
-          <Pause length="1"/>
-          <Say voice="Polly.Joanna" language="en-US">For English, press two.</Say>
+          ${menuPrompts}
         </Gather>
         <Say voice="alice">No selection made. Defaulting to English.</Say>
         <Redirect method="POST">/voice/start-conversation?lang=en</Redirect>
@@ -186,11 +201,31 @@ const routes = {
       return twiml(`<Say voice="alice">Session error. Goodbye.</Say><Hangup/>`);
     }
     
-    // Set language based on selection
-    state.lang = digit === '1' ? 'es' : 'en';
+    const menu = config.menu || { languages: [{ key: '1', lang: 'es' }, { key: '2', lang: 'en' }] };
+    const voiceConfig = config.voices || { es: 'Polly.Miguel', en: 'Polly.Matthew' };
+    
+    // Check for voice note option (9)
+    if (digit === (menu.voiceNote?.key || '9')) {
+      logCall('voice_note_start', { name: state.name, callSid });
+      state.mode = 'voicenote';
+      
+      const voice = voiceConfig['en'];
+      const vnConfig = config.voiceNotes || {};
+      const maxLength = vnConfig.maxLengthSeconds || 120;
+      
+      return twiml(`
+        <Say voice="${voice}" language="en-US">Please leave your voice note after the beep. Press any key when finished.</Say>
+        <Record action="/voice/save-voicenote" method="POST" maxLength="${maxLength}" playBeep="true" finishOnKey="any"/>
+        <Say voice="${voice}" language="en-US">No recording received. Goodbye.</Say>
+        <Hangup/>
+      `);
+    }
+    
+    // Find selected language from menu config
+    const selectedLang = menu.languages.find(l => l.key === digit);
+    state.lang = selectedLang?.lang || 'en';
     logCall('language_selected', { lang: state.lang, name: state.name });
     
-    const voiceConfig = config.voices || { es: 'Polly.Lupe', en: 'Polly.Joanna' };
     const voice = voiceConfig[state.lang];
     const langCode = state.lang === 'es' ? 'es-US' : 'en-US';
     
@@ -204,6 +239,54 @@ const routes = {
         <Pause length="1"/>
       </Gather>
       <Say voice="${voice}" language="${langCode}">${state.lang === 'es' ? 'No escuché nada. Adiós.' : 'No input received. Goodbye.'}</Say>
+      <Hangup/>
+    `);
+  },
+
+  'POST /voice/save-voicenote': async (req, body) => {
+    const { RecordingUrl, RecordingSid, RecordingDuration, CallSid, From: callerNumber } = body;
+    const state = callState.get(CallSid);
+    
+    if (!state) {
+      return twiml(`<Say voice="alice">Session error. Goodbye.</Say><Hangup/>`);
+    }
+    
+    const voiceConfig = config.voices || { es: 'Polly.Miguel', en: 'Polly.Matthew' };
+    const vnConfig = config.voiceNotes || {};
+    const saveDir = vnConfig.saveDir || './voice-notes';
+    
+    // Create voice note entry
+    const voiceNote = {
+      id: RecordingSid,
+      callSid: CallSid,
+      caller: callerNumber,
+      name: state.name,
+      recordingUrl: RecordingUrl,
+      duration: parseInt(RecordingDuration) || 0,
+      timestamp: new Date().toISOString(),
+      status: 'pending'
+    };
+    
+    logCall('voice_note_saved', voiceNote);
+    
+    // Save voice note metadata to file
+    try {
+      if (!fs.existsSync(saveDir)) {
+        fs.mkdirSync(saveDir, { recursive: true });
+      }
+      
+      const notesFile = path.join(saveDir, 'notes.jsonl');
+      fs.appendFileSync(notesFile, JSON.stringify(voiceNote) + '\n');
+      
+      logCall('voice_note_written', { file: notesFile, id: RecordingSid });
+    } catch (error) {
+      logCall('voice_note_error', { error: error.message });
+    }
+    
+    const voice = voiceConfig['en'];
+    
+    return twiml(`
+      <Say voice="${voice}" language="en-US">Your voice note has been saved and will be processed shortly. Thank you. Goodbye.</Say>
       <Hangup/>
     `);
   },
@@ -338,9 +421,12 @@ const server = http.createServer(async (req, res) => {
 server.listen(config.port, () => {
   console.log(`Twilio Voice Webhook Server running on port ${config.port}`);
   console.log(`Allowed numbers: ${config.allowedNumbers.length}`);
+  console.log(`Voice notes dir: ${config.voiceNotes?.saveDir || './voice-notes'}`);
   console.log(`Endpoints:`);
   console.log(`  POST /voice/incoming - Webhook for incoming calls`);
   console.log(`  POST /voice/verify-pin - PIN verification`);
+  console.log(`  POST /voice/select-language - Language/mode selection`);
   console.log(`  POST /voice/process-speech - Speech processing`);
+  console.log(`  POST /voice/save-voicenote - Save voice recording`);
   console.log(`  GET /health - Health check`);
 });
