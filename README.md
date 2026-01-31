@@ -379,7 +379,7 @@ Voice notes are saved in two parts:
   "id": "RExxxxxxxxxx",
   "callSid": "CAxxxxxxxxxx",
   "caller": "+1234567890",
-  "name": "Julio",
+  "name": "User",
   "recordingUrl": "https://api.twilio.com/...",
   "duration": 45,
   "timestamp": "2026-01-31T06:50:00.000Z",
