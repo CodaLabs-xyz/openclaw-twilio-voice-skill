@@ -431,42 +431,48 @@ const routes = {
   }
 };
 
-// Agent integration via Clawdbot Gateway
+// Direct Groq API for fast voice responses (no tools, no Gateway overhead)
 async function processWithAgent(userMessage, state) {
-  const gatewayUrl = config.agent?.gatewayUrl || 'http://localhost:18789';
-  const gatewayToken = config.agent?.gatewayToken;
-  const TIMEOUT_MS = 10000; // 10 seconds (Twilio timeout is ~15s)
+  const groqApiKey = process.env.GROQ_API_KEY;
+  const TIMEOUT_MS = 8000; // 8 seconds for safety margin
   
-  if (!gatewayToken) {
-    logCall('agent_error', { error: 'Gateway token not configured' });
-    return "The agent is not configured. Please set up the gateway token.";
+  if (!groqApiKey) {
+    logCall('agent_error', { error: 'GROQ_API_KEY not configured' });
+    return state.lang === 'es' 
+      ? "El agente no está configurado."
+      : "The agent is not configured.";
   }
   
   try {
     logCall('agent_request', { message: userMessage, name: state.name });
     
-    // Create AbortController for timeout
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
     
-    // Use Clawdbot gateway chat completions endpoint
-    const response = await fetch(`${gatewayUrl}/v1/chat/completions`, {
+    // Call Groq directly - much faster than Gateway with tools
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${gatewayToken}`
+        'Authorization': `Bearer ${groqApiKey}`
       },
       signal: controller.signal,
       body: JSON.stringify({
-        model: 'groq/llama-3.3-70b-versatile',
-        max_tokens: 200, // Reduced for faster responses
+        model: 'llama-3.3-70b-versatile',
+        max_tokens: 150,
+        temperature: 0.7,
         messages: [
           { 
             role: 'system', 
-            content: `You are Winston, a helpful AI assistant on a voice call with ${state.name}. 
-Keep responses SHORT and conversational (under 50 words) for text-to-speech.
-Be concise, friendly, natural. No markdown, no lists, no special formatting.
-Respond in ${state.lang === 'es' ? 'SPANISH' : 'ENGLISH'} only.`
+            content: `You are Winston Scott, a calm and professional AI assistant (like the Continental manager from John Wick).
+You're on a VOICE CALL with ${state.name}. Current time: ${new Date().toLocaleString('en-US', { timeZone: 'America/New_York' })}.
+
+RULES:
+- Keep responses under 40 words (this is voice, not text)
+- Be conversational and natural
+- No markdown, no lists, no bullet points
+- If asked about real-time data (weather, stocks, news), say you don't have live access on voice calls but can check later via text
+- Respond ONLY in ${state.lang === 'es' ? 'SPANISH' : 'ENGLISH'}`
           },
           { role: 'user', content: userMessage }
         ]
@@ -480,33 +486,31 @@ Respond in ${state.lang === 'es' ? 'SPANISH' : 'ENGLISH'} only.`
       logCall('agent_error', { status: response.status, error: errorText });
       return state.lang === 'es' 
         ? "Tuve un problema procesando eso. Intenta de nuevo."
-        : "I'm having trouble processing that right now. Please try again.";
+        : "I'm having trouble processing that. Please try again.";
     }
     
     const data = await response.json();
     logCall('agent_response', { response: data });
     
-    // Extract text response (OpenAI format)
     const reply = data.choices?.[0]?.message?.content || (state.lang === 'es' 
-      ? "Recibí tu mensaje pero no pude generar una respuesta."
-      : "I received your message but couldn't generate a response.");
+      ? "No pude generar una respuesta."
+      : "I couldn't generate a response.");
     
     return reply;
     
   } catch (error) {
     logCall('agent_error', { error: error.message });
     
-    // Check if it was a timeout
     if (error.name === 'AbortError') {
       logCall('agent_timeout', { timeout: TIMEOUT_MS });
       return state.lang === 'es'
-        ? "Disculpa, me tardé mucho procesando. Intenta con una pregunta más simple."
-        : "Sorry, that took too long. Try a simpler question.";
+        ? "Disculpa, tardé mucho. Intenta una pregunta más corta."
+        : "Sorry, that took too long. Try a shorter question.";
     }
     
     return state.lang === 'es'
-      ? "Lo siento, no pude conectar con el agente. Intenta más tarde."
-      : "I'm sorry, I couldn't connect to the agent. Please try again later.";
+      ? "Lo siento, hubo un error. Intenta más tarde."
+      : "Sorry, there was an error. Try again later.";
   }
 }
 
