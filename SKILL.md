@@ -74,6 +74,14 @@ ngrok http 3001
 
 Configure Twilio webhook URL: `https://your-domain/voice/incoming`
 
+## Session Management
+
+Each call creates a session keyed by caller phone number (Twilio's caller ID):
+- **Session key format:** `voice-(+1234567890)` (E.164 format)
+- Caller ID available automatically — no lookup required
+- Enables per-caller conversation history and context
+- Agent receives: phone number, caller name (from config), call duration
+
 ## Security Layers
 
 | Layer | Check | Action on Fail |

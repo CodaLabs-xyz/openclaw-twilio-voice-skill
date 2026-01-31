@@ -518,6 +518,108 @@ openclaw-twilio-voice-skill/
     └── twiml-patterns.md       # TwiML examples
 ```
 
+## 🚀 Production Deployment (pm2)
+
+For production use, run the webhook server and ngrok with pm2 for auto-restart and persistence.
+
+### Install pm2
+
+```bash
+npm install -g pm2
+```
+
+### Start Services
+
+```bash
+cd ~/clawd/skills/twilio-voice
+
+# Start webhook server
+pm2 start scripts/webhook-server.js --name voice-webhook
+
+# Start ngrok tunnel
+pm2 start "ngrok http 3001 --log=stdout" --name voice-ngrok
+
+# Check status
+pm2 list
+```
+
+### Configure Auto-Start on Reboot
+
+```bash
+# Generate startup script (run the command it outputs with sudo)
+pm2 startup
+
+# Save current process list
+pm2 save
+```
+
+The `pm2 startup` command will output something like:
+```bash
+sudo env PATH=$PATH:/Users/youruser/.nvm/versions/node/v22.22.0/bin /path/to/pm2 startup launchd -u youruser --hp /Users/youruser
+```
+
+Run that command with sudo to enable auto-start.
+
+### Useful pm2 Commands
+
+| Command | Description |
+|---------|-------------|
+| `pm2 list` | Show all processes |
+| `pm2 logs` | View logs (all processes) |
+| `pm2 logs voice-webhook` | View webhook logs only |
+| `pm2 logs voice-ngrok` | View ngrok logs only |
+| `pm2 restart all` | Restart all processes |
+| `pm2 restart voice-webhook` | Restart webhook only |
+| `pm2 stop all` | Stop all processes |
+| `pm2 delete all` | Remove all processes |
+| `pm2 monit` | Real-time monitoring dashboard |
+
+### Get ngrok URL After Restart
+
+```bash
+# Via ngrok API
+curl -s http://localhost:4040/api/tunnels | grep -o '"public_url":"https://[^"]*"'
+
+# Or check pm2 logs
+pm2 logs voice-ngrok --lines 20
+```
+
+### Fixed ngrok Domain (Recommended)
+
+With a free ngrok account, your URL changes on restart. For a fixed domain:
+
+1. Sign up at https://ngrok.com
+2. Get your authtoken from the dashboard
+3. Reserve a free static domain (1 free per account)
+
+```bash
+# Configure authtoken
+ngrok config add-authtoken YOUR_TOKEN
+
+# Use your static domain
+pm2 delete voice-ngrok
+pm2 start "ngrok http 3001 --domain=your-domain.ngrok-free.dev" --name voice-ngrok
+pm2 save
+```
+
+Then configure Twilio webhook URL once: `https://your-domain.ngrok-free.dev/voice/incoming`
+
+### VPS Deployment
+
+For VPS deployment (e.g., Hetzner, DigitalOcean):
+
+1. No ngrok needed - use direct IP or domain
+2. Configure firewall to allow port 3001 (or use nginx proxy)
+3. Use systemd instead of pm2 (optional)
+
+```bash
+# Allow port through firewall
+sudo ufw allow 3001/tcp
+
+# Or use nginx as reverse proxy (recommended)
+# Then set Twilio webhook to: https://yourdomain.com/voice/incoming
+```
+
 ## 💰 Estimated Costs
 
 | Item | Cost |

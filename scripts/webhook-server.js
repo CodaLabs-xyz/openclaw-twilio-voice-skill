@@ -88,11 +88,47 @@ function logCall(action, data) {
   console.log(JSON.stringify({ timestamp, action, ...data }));
 }
 
+// Escape XML special characters for TwiML
+function escapeXml(text) {
+  if (!text) return '';
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+// Clean text for TTS (remove markdown, format for speech)
+function cleanForTTS(text) {
+  if (!text) return '';
+  return text
+    // Remove markdown bold/italic
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/__([^_]+)__/g, '$1')
+    .replace(/_([^_]+)_/g, '$1')
+    // Convert bullet points to natural speech
+    .replace(/^- /gm, '. ')
+    .replace(/^\* /gm, '. ')
+    // Remove code backticks
+    .replace(/`([^`]+)`/g, '$1')
+    // Clean up multiple newlines
+    .replace(/\n{2,}/g, '. ')
+    .replace(/\n/g, ' ')
+    // Clean up multiple spaces
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
 // Routes
 const routes = {
   'POST /voice/incoming': async (req, body) => {
     const { From: callerNumber, CallSid: callSid } = body;
     
+    console.log('=== RAW BODY ===', body);
+    console.log('=== CALLER ===', callerNumber);
+    console.log('=== ALLOWED ===', config.allowedNumbers);
     logCall('incoming', { callerNumber, callSid });
     
     // Check rate limit
@@ -235,7 +271,7 @@ const routes = {
     
     return twiml(`
       <Say voice="${voice}" language="${langCode}">${welcomeMsg}</Say>
-      <Gather input="speech" speechTimeout="auto" timeout="15" action="/voice/process-speech" method="POST" language="${langCode}">
+      <Gather input="speech" speechTimeout="3" timeout="15" action="/voice/process-speech" method="POST" language="${langCode}">
         <Pause length="1"/>
       </Gather>
       <Say voice="${voice}" language="${langCode}">${state.lang === 'es' ? 'No escuché nada. Adiós.' : 'No input received. Goodbye.'}</Say>
@@ -368,18 +404,21 @@ const routes = {
     
     logCall('agent_response', { callerNumber, response: agentResponse });
     
+    // Clean markdown, escape XML, and truncate long responses
+    const safeResponse = escapeXml(cleanForTTS(agentResponse)).substring(0, 1000);
+    
     // Check for goodbye intent (EN/ES)
     if (speech?.toLowerCase().match(/goodbye|bye|adiós|adios|chao|hasta luego/)) {
       callState.delete(callSid);
       return twiml(`
-        <Say voice="${voice}" language="${langCode}">${agentResponse}</Say>
+        <Say voice="${voice}" language="${langCode}">${safeResponse}</Say>
         <Hangup/>
       `);
     }
     
     return twiml(`
-      <Say voice="${voice}" language="${langCode}">${agentResponse}</Say>
-      <Gather input="speech" speechTimeout="auto" timeout="15" action="/voice/process-speech" method="POST" language="${langCode}">
+      <Say voice="${voice}" language="${langCode}">${safeResponse}</Say>
+      <Gather input="speech" speechTimeout="3" timeout="15" action="/voice/process-speech" method="POST" language="${langCode}">
         <Pause length="1"/>
       </Gather>
       <Say voice="${voice}" language="${langCode}">${lang === 'es' ? 'No escuché nada. Adiós.' : 'No input received. Goodbye.'}</Say>
