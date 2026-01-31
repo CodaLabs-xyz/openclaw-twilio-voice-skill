@@ -435,6 +435,7 @@ const routes = {
 async function processWithAgent(userMessage, state) {
   const gatewayUrl = config.agent?.gatewayUrl || 'http://localhost:18789';
   const gatewayToken = config.agent?.gatewayToken;
+  const TIMEOUT_MS = 10000; // 10 seconds (Twilio timeout is ~15s)
   
   if (!gatewayToken) {
     logCall('agent_error', { error: 'Gateway token not configured' });
@@ -444,6 +445,10 @@ async function processWithAgent(userMessage, state) {
   try {
     logCall('agent_request', { message: userMessage, name: state.name });
     
+    // Create AbortController for timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
+    
     // Use Clawdbot gateway chat completions endpoint
     const response = await fetch(`${gatewayUrl}/v1/chat/completions`, {
       method: 'POST',
@@ -451,39 +456,57 @@ async function processWithAgent(userMessage, state) {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${gatewayToken}`
       },
+      signal: controller.signal,
       body: JSON.stringify({
         model: 'groq/llama-3.3-70b-versatile',
-        max_tokens: 300,
+        max_tokens: 200, // Reduced for faster responses
         messages: [
           { 
             role: 'system', 
-            content: `You are Winston, a helpful AI assistant. You're receiving a voice call from ${state.name}. 
-Keep responses concise and conversational (under 100 words) since this will be read aloud via text-to-speech.
-Be friendly, helpful, and natural. Don't use markdown or special formatting.
-IMPORTANT: The user selected ${state.lang === 'es' ? 'SPANISH' : 'ENGLISH'}. Always respond in ${state.lang === 'es' ? 'Spanish' : 'English'}.`
+            content: `You are Winston, a helpful AI assistant on a voice call with ${state.name}. 
+Keep responses SHORT and conversational (under 50 words) for text-to-speech.
+Be concise, friendly, natural. No markdown, no lists, no special formatting.
+Respond in ${state.lang === 'es' ? 'SPANISH' : 'ENGLISH'} only.`
           },
           { role: 'user', content: userMessage }
         ]
       })
     });
     
+    clearTimeout(timeoutId);
+    
     if (!response.ok) {
       const errorText = await response.text();
       logCall('agent_error', { status: response.status, error: errorText });
-      return "I'm having trouble processing that right now. Please try again.";
+      return state.lang === 'es' 
+        ? "Tuve un problema procesando eso. Intenta de nuevo."
+        : "I'm having trouble processing that right now. Please try again.";
     }
     
     const data = await response.json();
     logCall('agent_response', { response: data });
     
     // Extract text response (OpenAI format)
-    const reply = data.choices?.[0]?.message?.content || "I received your message but couldn't generate a response.";
+    const reply = data.choices?.[0]?.message?.content || (state.lang === 'es' 
+      ? "Recibí tu mensaje pero no pude generar una respuesta."
+      : "I received your message but couldn't generate a response.");
     
     return reply;
     
   } catch (error) {
     logCall('agent_error', { error: error.message });
-    return "I'm sorry, I couldn't connect to the agent. Please try again later.";
+    
+    // Check if it was a timeout
+    if (error.name === 'AbortError') {
+      logCall('agent_timeout', { timeout: TIMEOUT_MS });
+      return state.lang === 'es'
+        ? "Disculpa, me tardé mucho procesando. Intenta con una pregunta más simple."
+        : "Sorry, that took too long. Try a simpler question.";
+    }
+    
+    return state.lang === 'es'
+      ? "Lo siento, no pude conectar con el agente. Intenta más tarde."
+      : "I'm sorry, I couldn't connect to the agent. Please try again later.";
   }
 }
 
