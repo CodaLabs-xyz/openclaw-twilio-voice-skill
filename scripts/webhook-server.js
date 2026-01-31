@@ -146,11 +146,15 @@ const routes = {
       
       // Connected - start conversation
       return twiml(`
-        <Say voice="alice">Welcome ${state.name}. You are now connected. Please speak after the tone.</Say>
-        <Gather input="speech" speechTimeout="auto" action="/voice/process-speech" method="POST" language="en-US">
-          <Pause length="1"/>
+        <Say voice="alice">Welcome ${state.name}. You are now connected. Go ahead and speak.</Say>
+        <Gather input="speech" speechTimeout="3" timeout="10" action="/voice/process-speech" method="POST" language="en-US">
+          <Say voice="alice">I'm listening.</Say>
         </Gather>
-        <Say voice="alice">I didn't hear anything. Goodbye.</Say>
+        <Say voice="alice">I didn't hear anything. Let me try again.</Say>
+        <Gather input="speech" speechTimeout="3" timeout="10" action="/voice/process-speech" method="POST" language="en-US">
+          <Say voice="alice">Please say something.</Say>
+        </Gather>
+        <Say voice="alice">Still no input. Goodbye.</Say>
         <Hangup/>
       `);
     }
@@ -217,20 +221,59 @@ const routes = {
   }
 };
 
-// Agent integration placeholder
+// Agent integration via Clawdbot Gateway
 async function processWithAgent(userMessage, state) {
-  // TODO: Integrate with Clawdbot/OpenClaw agent
-  // This is a placeholder that echoes back
+  const gatewayUrl = config.agent?.gatewayUrl || 'http://localhost:18789';
+  const gatewayToken = config.agent?.gatewayToken;
   
-  // Example integration:
-  // const response = await fetch('http://localhost:18789/api/chat', {
-  //   method: 'POST',
-  //   headers: { 'Content-Type': 'application/json' },
-  //   body: JSON.stringify({ message: userMessage, context: state })
-  // });
-  // return response.json().reply;
+  if (!gatewayToken) {
+    logCall('agent_error', { error: 'Gateway token not configured' });
+    return "The agent is not configured. Please set up the gateway token.";
+  }
   
-  return `You said: ${userMessage}. This is a placeholder response. The agent integration is not yet configured.`;
+  try {
+    logCall('agent_request', { message: userMessage, name: state.name });
+    
+    // Use Clawdbot gateway chat completions endpoint
+    const response = await fetch(`${gatewayUrl}/v1/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${gatewayToken}`
+      },
+      body: JSON.stringify({
+        model: 'groq/llama-3.3-70b-versatile',
+        max_tokens: 300,
+        messages: [
+          { 
+            role: 'system', 
+            content: `You are Winston, a helpful AI assistant. You're receiving a voice call from ${state.name}. 
+Keep responses concise and conversational (under 100 words) since this will be read aloud via text-to-speech.
+Be friendly, helpful, and natural. Don't use markdown or special formatting.`
+          },
+          { role: 'user', content: userMessage }
+        ]
+      })
+    });
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      logCall('agent_error', { status: response.status, error: errorText });
+      return "I'm having trouble processing that right now. Please try again.";
+    }
+    
+    const data = await response.json();
+    logCall('agent_response', { response: data });
+    
+    // Extract text response (OpenAI format)
+    const reply = data.choices?.[0]?.message?.content || "I received your message but couldn't generate a response.";
+    
+    return reply;
+    
+  } catch (error) {
+    logCall('agent_error', { error: error.message });
+    return "I'm sorry, I couldn't connect to the agent. Please try again later.";
+  }
 }
 
 // Server
