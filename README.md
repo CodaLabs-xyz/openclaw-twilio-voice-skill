@@ -23,30 +23,41 @@ graph TB
         Twilio["☁️ Twilio"]
     end
     
-    subgraph Server["Webhook Server"]
-        Webhook["🌐 Webhook Endpoint"]
-        Auth["🔐 Auth Layer"]
+    subgraph Server["Webhook Server :3001"]
+        Webhook["🌐 /voice/incoming"]
+        Auth["🔐 Caller ID Check"]
         PIN["🔢 PIN Verify"]
+        Menu["🌍 Language Menu"]
         Speech["🎤 Speech Handler"]
+        VoiceNote["📝 Voice Note"]
     end
     
-    subgraph Agent["OpenClaw Agent"]
-        Gateway["🚪 Gateway"]
-        LLM["🧠 Claude/LLM"]
+    subgraph Agent["Clawdbot Gateway :18789"]
+        Gateway["🚪 /v1/chat/completions"]
+        LLM["🧠 Groq LLaMA 3.3"]
     end
     
-    subgraph Voice["Voice Pipeline"]
-        STT["📝 STT (Whisper)"]
-        TTS["🔊 TTS (ElevenLabs)"]
+    subgraph Voice["Twilio Voice Pipeline"]
+        STT["📝 STT (Twilio built-in)"]
+        TTS["🔊 TTS (Polly Neural)"]
+    end
+    
+    subgraph Storage["Local Storage"]
+        Notes["📁 voice-notes/"]
+        Transcribe["🎯 Groq Whisper"]
     end
     
     Phone --> Twilio
     Twilio --> Webhook
     Webhook --> Auth
-    Auth -->|Allowed| PIN
     Auth -->|Blocked| Twilio
-    PIN -->|Valid| Speech
+    Auth -->|Allowed| PIN
     PIN -->|Invalid| Twilio
+    PIN -->|Valid| Menu
+    Menu -->|1,2| Speech
+    Menu -->|9| VoiceNote
+    VoiceNote --> Notes
+    Notes --> Transcribe
     Speech --> STT
     STT --> Gateway
     Gateway --> LLM
@@ -58,6 +69,8 @@ graph TB
     style Twilio fill:#fff3e0
     style Auth fill:#ffebee
     style LLM fill:#e8f5e9
+    style Menu fill:#e3f2fd
+    style VoiceNote fill:#f3e5f5
 ```
 
 ## 🔄 Call Flow Sequence
@@ -78,8 +91,8 @@ sequenceDiagram
         T->>P: Call Ended
     else In Allowlist
         W->>T: Request PIN (TwiML)
-        T->>P: "Enter your PIN"
-        P->>T: DTMF: ****
+        T->>P: "Enter your 6 digit PIN"
+        P->>T: DTMF: ******
         T->>W: POST /voice/verify-pin
         
         alt Wrong PIN (< 3 attempts)
@@ -89,22 +102,36 @@ sequenceDiagram
             W->>T: Hangup
             T->>P: Call Ended
         else Correct PIN
-            W->>T: "Connected"
-            T->>P: Welcome message
+            W->>T: Language Menu (TwiML)
+            T->>P: "Para español 1, English 2, Voice note 9"
+            P->>T: DTMF: 1/2/9
+            T->>W: POST /voice/select-language
             
-            loop Conversation
-                P->>T: Speech
-                T->>W: POST /voice/process-speech
-                W->>A: User message
-                A->>W: Agent response
-                W->>T: TTS response
-                T->>P: Audio playback
+            alt Voice Note (9)
+                W->>T: Record prompt
+                T->>P: "Leave message after beep"
+                P->>T: Voice recording
+                T->>W: POST /voice/save-voicenote
+                W->>W: Save + Transcribe (Groq)
+                W->>T: "Saved. Goodbye."
+                T->>P: Call Ended
+            else Language (1/2)
+                W->>T: Welcome in selected language
+                T->>P: "Bienvenido / Welcome"
+                
+                loop Conversation
+                    P->>T: Speech
+                    T->>W: POST /voice/process-speech
+                    W->>A: User message (via Gateway)
+                    A->>W: Agent response
+                    W->>T: TTS response (Polly Neural)
+                    T->>P: Audio playback
+                end
+                
+                P->>T: "Adiós / Goodbye"
+                W->>T: Farewell + Hangup
+                T->>P: Call Ended
             end
-            
-            P->>T: "Goodbye"
-            T->>W: Process speech
-            W->>T: Farewell + Hangup
-            T->>P: Call Ended
         end
     end
 ```
@@ -115,16 +142,23 @@ sequenceDiagram
 graph LR
     A["📞 Incoming Call"] --> B{"🔍 Caller ID<br/>in Allowlist?"}
     B -->|No| C["❌ Reject"]
-    B -->|Yes| D{"🔢 Valid PIN?"}
+    B -->|Yes| R{"⏱️ Rate Limit<br/>< 5/hour?"}
+    R -->|No| C
+    R -->|Yes| D{"🔢 Valid PIN?"}
     D -->|No| E{"Attempts < 3?"}
     E -->|Yes| D
     E -->|No| C
-    D -->|Yes| F{"⏱️ Rate Limit<br/>OK?"}
-    F -->|No| C
-    F -->|Yes| G["✅ Connected"]
+    D -->|Yes| M{"🌍 Menu<br/>Selection"}
+    M -->|1| ES["🇪🇸 Spanish"]
+    M -->|2| EN["🇺🇸 English"]
+    M -->|9| VN["📝 Voice Note"]
+    ES --> G["✅ Agent Connected"]
+    EN --> G
+    VN --> S["💾 Save & Transcribe"]
     
     style C fill:#ffcdd2
     style G fill:#c8e6c9
+    style S fill:#e1bee7
 ```
 
 ## 📋 Twilio Requirements
