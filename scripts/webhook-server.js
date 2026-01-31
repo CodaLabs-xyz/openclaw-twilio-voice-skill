@@ -123,8 +123,8 @@ const routes = {
     
     // Request PIN
     return twiml(`
-      <Gather input="dtmf" numDigits="4" action="/voice/verify-pin" method="POST" timeout="10">
-        <Say voice="alice">Welcome. Please enter your 4 digit PIN.</Say>
+      <Gather input="dtmf" numDigits="6" action="/voice/verify-pin" method="POST" timeout="10">
+        <Say voice="alice">Welcome. Please enter your 6 digit PIN.</Say>
       </Gather>
       <Say voice="alice">No input received. Goodbye.</Say>
       <Hangup/>
@@ -169,7 +169,7 @@ const routes = {
     }
     
     return twiml(`
-      <Gather input="dtmf" numDigits="4" action="/voice/verify-pin" method="POST" timeout="10">
+      <Gather input="dtmf" numDigits="6" action="/voice/verify-pin" method="POST" timeout="10">
         <Say voice="alice">Incorrect PIN. You have ${config.maxAttempts - state.attempts} attempts remaining. Please try again.</Say>
       </Gather>
       <Say voice="alice">No input received. Goodbye.</Say>

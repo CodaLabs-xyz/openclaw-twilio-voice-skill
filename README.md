@@ -196,12 +196,19 @@ Edit `voice-config.json`:
 ```json
 {
   "allowedNumbers": [
-    { "number": "+1234567890", "pin": "1234", "name": "Julio" }
+    { "number": "+1234567890", "pin": "123456", "name": "YourName" }
   ],
   "maxAttempts": 3,
-  "rateLimitPerHour": 5
+  "rateLimitPerHour": 5,
+  "twilio": {
+    "accountSid": "YOUR_ACCOUNT_SID",
+    "authToken": "YOUR_AUTH_TOKEN",
+    "phoneNumber": "+1234567890"
+  }
 }
 ```
+
+> ⚠️ **Never commit `voice-config.json`** - it contains secrets. It's already in `.gitignore`.
 
 ### 3. Set Environment Variables
 
@@ -214,24 +221,75 @@ export TWILIO_PHONE_NUMBER="+1234567890"
 ### 4. Run Server
 
 ```bash
-# Development
+# Development (with auto-reload)
 npm run dev
 
 # Production
 npm start
 ```
 
+Server starts on port 3001 by default.
+
 ### 5. Expose Webhook (Development)
 
+Choose one of these tunneling options:
+
+#### Option A: localtunnel (No account required)
 ```bash
+npx localtunnel --port 3001
+# Output: your url is: https://xxx-xxx-xxx.loca.lt
+```
+
+#### Option B: ngrok (Requires free account)
+```bash
+# First time: authenticate
+ngrok config add-authtoken YOUR_NGROK_TOKEN
+
+# Start tunnel
 ngrok http 3001
 ```
 
-### 6. Configure Twilio
+#### Option C: Cloudflare Tunnel (No account required)
+```bash
+# Install
+brew install cloudflared
 
-Set your Twilio phone number's webhook URL to:
+# Quick tunnel
+cloudflared tunnel --url http://localhost:3001
 ```
-https://your-domain.ngrok.io/voice/incoming
+
+### 6. Configure Twilio Webhook
+
+#### Option A: Via Twilio Console (Manual)
+1. Go to [Phone Numbers → Active Numbers](https://console.twilio.com/us1/develop/phone-numbers/manage/incoming)
+2. Click your number
+3. Under "Voice Configuration":
+   - **A call comes in:** Webhook
+   - **URL:** `https://your-tunnel-url/voice/incoming`
+   - **Method:** POST
+4. Save
+
+#### Option B: Via API (Automated)
+```bash
+# Get your phone number SID
+curl -s "https://api.twilio.com/2010-04-01/Accounts/$TWILIO_ACCOUNT_SID/IncomingPhoneNumbers.json" \
+  -u "$TWILIO_ACCOUNT_SID:$TWILIO_AUTH_TOKEN" | grep -o '"sid":"PN[^"]*"'
+
+# Update webhook URL (replace PN_SID and TUNNEL_URL)
+curl -X POST "https://api.twilio.com/2010-04-01/Accounts/$TWILIO_ACCOUNT_SID/IncomingPhoneNumbers/PN_SID.json" \
+  -u "$TWILIO_ACCOUNT_SID:$TWILIO_AUTH_TOKEN" \
+  -d "VoiceUrl=https://TUNNEL_URL/voice/incoming" \
+  -d "VoiceMethod=POST"
+```
+
+### 7. Test the Setup
+
+```bash
+# Check server health
+curl http://localhost:3001/health
+
+# Call your Twilio number from an allowed phone
+# You should hear: "Welcome. Please enter your 6 digit PIN."
 ```
 
 ## 📁 Project Structure

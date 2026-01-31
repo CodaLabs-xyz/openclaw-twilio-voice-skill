@@ -1,0 +1,12 @@
+# Config with secrets
+voice-config.json
+
+# Dependencies
+node_modules/
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.local
