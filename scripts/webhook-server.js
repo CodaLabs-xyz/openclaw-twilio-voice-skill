@@ -144,17 +144,17 @@ const routes = {
     if (enteredPin === correctPin) {
       logCall('authenticated', { callerNumber, name: state.name });
       
-      // Connected - start conversation
+      // Connected - start conversation (bilingual ES/EN)
       return twiml(`
-        <Say voice="alice">Welcome ${state.name}. You are now connected. Go ahead and speak.</Say>
-        <Gather input="speech" speechTimeout="3" timeout="10" action="/voice/process-speech" method="POST" language="en-US">
-          <Say voice="alice">I'm listening.</Say>
+        <Say voice="alice" language="es-US">Bienvenido ${state.name}. Estás conectado. Puedes hablar en español o inglés.</Say>
+        <Gather input="speech" speechTimeout="auto" timeout="15" action="/voice/process-speech" method="POST" language="es-US" hints="hola,ayuda,gracias,adiós,hello,help,thanks,goodbye">
+          <Say voice="alice" language="es-US">Te escucho.</Say>
         </Gather>
-        <Say voice="alice">I didn't hear anything. Let me try again.</Say>
-        <Gather input="speech" speechTimeout="3" timeout="10" action="/voice/process-speech" method="POST" language="en-US">
-          <Say voice="alice">Please say something.</Say>
+        <Say voice="alice" language="es-US">No escuché nada. Intenta de nuevo.</Say>
+        <Gather input="speech" speechTimeout="auto" timeout="15" action="/voice/process-speech" method="POST" language="es-US" hints="hola,ayuda,gracias,adiós,hello,help,thanks,goodbye">
+          <Say voice="alice" language="es-US">Por favor di algo.</Say>
         </Gather>
-        <Say voice="alice">Still no input. Goodbye.</Say>
+        <Say voice="alice" language="es-US">Sin respuesta. Adiós.</Say>
         <Hangup/>
       `);
     }
@@ -197,21 +197,21 @@ const routes = {
     
     logCall('agent_response', { callerNumber, response: agentResponse });
     
-    // Check for goodbye intent
-    if (speech?.toLowerCase().includes('goodbye') || speech?.toLowerCase().includes('bye')) {
+    // Check for goodbye intent (EN/ES)
+    if (speech?.toLowerCase().match(/goodbye|bye|adiós|adios|chao|hasta luego/)) {
       callState.delete(callSid);
       return twiml(`
-        <Say voice="alice">${agentResponse}</Say>
+        <Say voice="alice" language="es-US">${agentResponse}</Say>
         <Hangup/>
       `);
     }
     
     return twiml(`
-      <Say voice="alice">${agentResponse}</Say>
-      <Gather input="speech" speechTimeout="auto" action="/voice/process-speech" method="POST" language="en-US">
+      <Say voice="alice" language="es-US">${agentResponse}</Say>
+      <Gather input="speech" speechTimeout="auto" timeout="15" action="/voice/process-speech" method="POST" language="es-US" hints="hola,ayuda,gracias,adiós,hello,help,thanks,goodbye">
         <Pause length="1"/>
       </Gather>
-      <Say voice="alice">I didn't hear anything. Goodbye.</Say>
+      <Say voice="alice" language="es-US">No escuché nada. Adiós.</Say>
       <Hangup/>
     `);
   },
@@ -249,7 +249,8 @@ async function processWithAgent(userMessage, state) {
             role: 'system', 
             content: `You are Winston, a helpful AI assistant. You're receiving a voice call from ${state.name}. 
 Keep responses concise and conversational (under 100 words) since this will be read aloud via text-to-speech.
-Be friendly, helpful, and natural. Don't use markdown or special formatting.`
+Be friendly, helpful, and natural. Don't use markdown or special formatting.
+IMPORTANT: Respond in the same language the user speaks. If they speak Spanish, respond in Spanish. If English, respond in English.`
           },
           { role: 'user', content: userMessage }
         ]
