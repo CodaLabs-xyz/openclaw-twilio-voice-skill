@@ -2,16 +2,16 @@
   "allowedNumbers": [
     {
       "number": "+1234567890",
-      "pin": "1234",
-      "name": "User"
+      "pin": "123456",
+      "name": "YourName"
     }
   ],
   "maxAttempts": 3,
   "rateLimitPerHour": 5,
   "port": 3001,
   "voices": {
-    "es": "Polly.Miguel",
-    "en": "Polly.Matthew"
+    "es": "Polly.Andres-Neural",
+    "en": "Polly.Matthew-Neural"
   },
   "menu": {
     "languages": [
@@ -33,8 +33,14 @@
     "authToken": "your_auth_token",
     "phoneNumber": "+1234567890"
   },
-  "agent": {
-    "gatewayUrl": "http://localhost:18789",
-    "gatewayToken": "your_gateway_token"
+  "telegram": {
+    "botToken": "env:TELEGRAM_BOT_TOKEN",
+    "defaultChatId": "your_telegram_user_id"
+  },
+  "queueWorker": {
+    "pollInterval": 30000
+  },
+  "ngrok": {
+    "domain": "your-domain.ngrok.io"
   }
 }
