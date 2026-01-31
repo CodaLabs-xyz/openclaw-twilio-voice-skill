@@ -857,7 +857,12 @@ sudo ufw allow 3001/tcp
 
 ## 📖 Documentation
 
+### Guides
 - [SKILL.md](SKILL.md) - Complete skill documentation for OpenClaw
+- [ARCHITECTURE.md](ARCHITECTURE.md) - Detailed architecture and design decisions
+- [docs/STT-COMPARISON.md](docs/STT-COMPARISON.md) - Deepgram vs Groq STT comparison
+
+### References
 - [references/twilio-api.md](references/twilio-api.md) - Twilio API reference
 - [references/twiml-patterns.md](references/twiml-patterns.md) - TwiML examples
 

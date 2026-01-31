@@ -102,8 +102,14 @@ See [references/twilio-api.md](references/twilio-api.md) for Twilio API details.
 ## Scripts
 
 - `scripts/webhook-server.js` - Main webhook server
-- `scripts/test-call.js` - Test outbound call
+- `scripts/queue-worker.js` - Async query processor
+- `scripts/test-server.js` - Endpoint tests
 - `scripts/verify-config.js` - Validate configuration
+
+## Documentation
+
+- [ARCHITECTURE.md](ARCHITECTURE.md) - Design decisions and patterns
+- [docs/STT-COMPARISON.md](docs/STT-COMPARISON.md) - Deepgram vs Groq analysis
 
 ## Costs
 
