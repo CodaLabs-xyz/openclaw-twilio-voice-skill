@@ -10,8 +10,8 @@
   "rateLimitPerHour": 5,
   "port": 3001,
   "voices": {
-    "es": "Polly.Lupe",
-    "en": "Polly.Joanna"
+    "es": "Polly.Miguel",
+    "en": "Polly.Matthew"
   },
   "twilio": {
     "accountSid": "ACxxxxxxxxxx",

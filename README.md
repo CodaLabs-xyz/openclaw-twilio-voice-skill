@@ -292,6 +292,110 @@ curl http://localhost:3001/health
 # You should hear: "Welcome. Please enter your 6 digit PIN."
 ```
 
+## 🗣️ Voice Configuration
+
+The skill supports multiple TTS voices from Amazon Polly and Google. Configure voices per language in `voice-config.json`:
+
+```json
+{
+  "voices": {
+    "es": "Polly.Miguel",
+    "en": "Polly.Matthew"
+  }
+}
+```
+
+### Available Spanish Voices
+
+| Voice | Gender | Accent | Type | Provider |
+|-------|--------|--------|------|----------|
+| `Polly.Miguel` | Male | US Spanish | Standard | Amazon |
+| `Polly.Enrique` | Male | Castilian | Standard | Amazon |
+| `Polly.Andres-Neural` | Male | Mexican | Neural | Amazon |
+| `Polly.Sergio-Neural` | Male | Castilian | Neural | Amazon |
+| `Polly.Lupe` | Female | US Spanish | Neural | Amazon |
+| `Polly.Penelope` | Female | US Spanish | Standard | Amazon |
+| `Polly.Mia-Neural` | Female | Mexican | Neural | Amazon |
+| `Polly.Lucia-Neural` | Female | Castilian | Neural | Amazon |
+| `Google.es-US-Neural2-A` | Female | US Spanish | Neural | Google |
+| `Google.es-US-Neural2-B` | Male | US Spanish | Neural | Google |
+| `Google.es-US-Neural2-C` | Male | US Spanish | Neural | Google |
+| `Google.es-MX-Neural2-A` | Female | Mexican | Neural | Google |
+| `Google.es-MX-Neural2-B` | Male | Mexican | Neural | Google |
+
+### Available English Voices
+
+| Voice | Gender | Accent | Type | Provider |
+|-------|--------|--------|------|----------|
+| `Polly.Matthew` | Male | US English | Neural | Amazon |
+| `Polly.Stephen-Neural` | Male | US English | Neural | Amazon |
+| `Polly.Joey` | Male | US English | Standard | Amazon |
+| `Polly.Justin` | Male | US English | Standard | Amazon |
+| `Polly.Joanna` | Female | US English | Neural | Amazon |
+| `Polly.Ruth-Neural` | Female | US English | Neural | Amazon |
+| `Polly.Kendra` | Female | US English | Standard | Amazon |
+| `Polly.Salli` | Female | US English | Standard | Amazon |
+| `Polly.Amy` | Female | British | Neural | Amazon |
+| `Polly.Brian` | Male | British | Neural | Amazon |
+| `Google.en-US-Neural2-A` | Male | US English | Neural | Google |
+| `Google.en-US-Neural2-D` | Male | US English | Neural | Google |
+| `Google.en-US-Neural2-J` | Male | US English | Neural | Google |
+| `Google.en-US-Neural2-C` | Female | US English | Neural | Google |
+| `Google.en-US-Neural2-E` | Female | US English | Neural | Google |
+| `Google.en-US-Neural2-F` | Female | US English | Neural | Google |
+
+### Voice Quality Comparison
+
+| Type | Quality | Cost | Best For |
+|------|---------|------|----------|
+| **Standard** | Good | $ | Development, testing |
+| **Neural** | Excellent | $$ | Production, natural conversations |
+| **Generative** | Best | $$$ | Premium experiences |
+
+> 💡 **Tip:** Neural voices (marked with `-Neural`) sound more natural and are recommended for production use.
+
+### Example Configurations
+
+**Male voices (recommended):**
+```json
+{
+  "voices": {
+    "es": "Polly.Miguel",
+    "en": "Polly.Matthew"
+  }
+}
+```
+
+**Female voices:**
+```json
+{
+  "voices": {
+    "es": "Polly.Lupe",
+    "en": "Polly.Joanna"
+  }
+}
+```
+
+**High-quality Neural voices:**
+```json
+{
+  "voices": {
+    "es": "Polly.Andres-Neural",
+    "en": "Polly.Stephen-Neural"
+  }
+}
+```
+
+**Google voices:**
+```json
+{
+  "voices": {
+    "es": "Google.es-US-Neural2-B",
+    "en": "Google.en-US-Neural2-D"
+  }
+}
+```
+
 ## 📁 Project Structure
 
 ```
