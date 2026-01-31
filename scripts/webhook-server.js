@@ -38,22 +38,7 @@ const rateLimits = new Map(); // phoneNumber -> { count, resetTime }
 // Queue for async processing
 const QUEUE_PATH = process.env.QUEUE_PATH || path.join(__dirname, '..', 'pending-queries.jsonl');
 
-// Patterns that indicate a query needs tools/async processing
-const COMPLEX_QUERY_PATTERNS = [
-  /clima|weather|temperatura|temperature/i,
-  /busca|search|encuentra|find|investigar/i,
-  /noticias|news/i,
-  /cron|tarea|task|job|ejecuta|run|schedule/i,
-  /email|correo|mensaje|message/i,
-  /precio|price|stock|crypto|bitcoin|eth/i,
-  /calendario|calendar|evento|event/i,
-  /recuerda|remind|recordatorio|reminder/i,
-];
-
-function isComplexQuery(message) {
-  return COMPLEX_QUERY_PATTERNS.some(pattern => pattern.test(message));
-}
-
+// Queue query for async processing (will be sent via configured channel)
 function queueForAsyncProcessing(query) {
   try {
     const entry = {
@@ -471,10 +456,11 @@ const routes = {
   }
 };
 
-// Direct Groq API for fast voice responses (no tools, no Gateway overhead)
+// Direct Groq API for fast voice responses with retry and fallback to queue
 async function processWithAgent(userMessage, state) {
   const groqApiKey = process.env.GROQ_API_KEY;
-  const TIMEOUT_MS = 8000; // 8 seconds for safety margin
+  const FIRST_TIMEOUT_MS = 5000;  // First attempt: 5 seconds
+  const SECOND_TIMEOUT_MS = 5000; // Retry: 5 more seconds
   
   if (!groqApiKey) {
     logCall('agent_error', { error: 'GROQ_API_KEY not configured' });
@@ -483,94 +469,109 @@ async function processWithAgent(userMessage, state) {
       : "The agent is not configured.";
   }
   
-  // Check if this is a complex query that needs async processing
-  if (isComplexQuery(userMessage)) {
-    logCall('complex_query_detected', { message: userMessage.substring(0, 50) });
-    
-    // Queue for async processing
-    const queued = queueForAsyncProcessing({
-      message: userMessage,
-      lang: state.lang,
-      callerNumber: state.callerNumber,
-      callerName: state.name,
-      chatId: config.telegram?.defaultChatId
-    });
-    
-    if (queued) {
-      return state.lang === 'es'
-        ? "Esa pregunta requiere más tiempo. Te envío la respuesta por Telegram en unos minutos."
-        : "That question needs more time. I'll send you the answer via Telegram in a few minutes.";
-    }
-  }
-  
-  try {
-    logCall('agent_request', { message: userMessage, name: state.name });
-    
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
-    
-    // Call Groq directly - much faster than Gateway with tools
-    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${groqApiKey}`
-      },
-      signal: controller.signal,
-      body: JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
-        max_tokens: 150,
-        temperature: 0.7,
-        messages: [
-          { 
-            role: 'system', 
-            content: `You are Winston Scott, a calm and professional AI assistant (like the Continental manager from John Wick).
+  const systemPrompt = `You are Winston Scott, a calm and professional AI assistant (like the Continental manager from John Wick).
 You're on a VOICE CALL with ${state.name}. Current time: ${new Date().toLocaleString('en-US', { timeZone: 'America/New_York' })}.
 
 RULES:
 - Keep responses under 40 words (this is voice, not text)
 - Be conversational and natural
 - No markdown, no lists, no bullet points
-- Respond ONLY in ${state.lang === 'es' ? 'SPANISH' : 'ENGLISH'}`
-          },
-          { role: 'user', content: userMessage }
-        ]
-      })
+- Respond ONLY in ${state.lang === 'es' ? 'SPANISH' : 'ENGLISH'}`;
+
+  // Helper function to call Groq with timeout
+  async function callGroq(timeoutMs) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    
+    try {
+      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${groqApiKey}`
+        },
+        signal: controller.signal,
+        body: JSON.stringify({
+          model: 'llama-3.3-70b-versatile',
+          max_tokens: 150,
+          temperature: 0.7,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userMessage }
+          ]
+        })
+      });
+      
+      clearTimeout(timeoutId);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      
+      const data = await response.json();
+      return { success: true, reply: data.choices?.[0]?.message?.content };
+    } catch (error) {
+      clearTimeout(timeoutId);
+      if (error.name === 'AbortError') {
+        return { success: false, timeout: true };
+      }
+      return { success: false, error: error.message };
+    }
+  }
+  
+  logCall('agent_request', { message: userMessage, name: state.name });
+  
+  // FIRST ATTEMPT (5 seconds)
+  logCall('agent_attempt', { attempt: 1, timeout: FIRST_TIMEOUT_MS });
+  let result = await callGroq(FIRST_TIMEOUT_MS);
+  
+  if (result.success && result.reply) {
+    logCall('agent_response', { attempt: 1, response: result.reply.substring(0, 100) });
+    return result.reply;
+  }
+  
+  // First attempt timed out - tell user to wait
+  if (result.timeout) {
+    logCall('agent_first_timeout', { message: userMessage.substring(0, 50) });
+    
+    // Return "please wait" message - Twilio will speak this
+    // But we need to continue processing... This is tricky with TwiML
+    // Instead, we'll do retry inline and only queue if both fail
+    
+    // SECOND ATTEMPT (5 more seconds)
+    logCall('agent_attempt', { attempt: 2, timeout: SECOND_TIMEOUT_MS });
+    result = await callGroq(SECOND_TIMEOUT_MS);
+    
+    if (result.success && result.reply) {
+      logCall('agent_response', { attempt: 2, response: result.reply.substring(0, 100) });
+      // Prepend a brief apology for the wait
+      const prefix = state.lang === 'es' ? 'Disculpa la espera. ' : 'Sorry for the wait. ';
+      return prefix + result.reply;
+    }
+    
+    // Both attempts failed - queue for async processing
+    logCall('agent_queue_fallback', { message: userMessage.substring(0, 50) });
+    
+    const queued = queueForAsyncProcessing({
+      message: userMessage,
+      lang: state.lang,
+      callerNumber: state.callerNumber,
+      callerName: state.name,
+      chatId: config.asyncResponse?.telegram?.chatId || config.telegram?.defaultChatId
     });
     
-    clearTimeout(timeoutId);
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      logCall('agent_error', { status: response.status, error: errorText });
-      return state.lang === 'es' 
-        ? "Tuve un problema procesando eso. Intenta de nuevo."
-        : "I'm having trouble processing that. Please try again.";
-    }
-    
-    const data = await response.json();
-    logCall('agent_response', { response: data });
-    
-    const reply = data.choices?.[0]?.message?.content || (state.lang === 'es' 
-      ? "No pude generar una respuesta."
-      : "I couldn't generate a response.");
-    
-    return reply;
-    
-  } catch (error) {
-    logCall('agent_error', { error: error.message });
-    
-    if (error.name === 'AbortError') {
-      logCall('agent_timeout', { timeout: TIMEOUT_MS });
+    if (queued) {
       return state.lang === 'es'
-        ? "Disculpa, tardé mucho. Intenta una pregunta más corta."
-        : "Sorry, that took too long. Try a shorter question.";
+        ? "Esa pregunta está tomando más tiempo del esperado. Te envío la respuesta por mensaje de texto en unos minutos."
+        : "That question is taking longer than expected. I'll send you the answer via text message in a few minutes.";
     }
-    
-    return state.lang === 'es'
-      ? "Lo siento, hubo un error. Intenta más tarde."
-      : "Sorry, there was an error. Try again later.";
   }
+  
+  // Non-timeout error
+  logCall('agent_error', { error: result.error });
+  return state.lang === 'es'
+    ? "Lo siento, hubo un error. Intenta más tarde."
+    : "Sorry, there was an error. Try again later.";
 }
 
 // Server

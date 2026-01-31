@@ -455,31 +455,41 @@ Complex queries (weather, tasks, searches) can't be processed in real-time due t
 
 ```mermaid
 graph LR
-    A["📞 Voice Call"] --> B{"Query Type?"}
-    B -->|Simple| C["🚀 Groq Direct"]
-    C --> D["🔊 Instant Response"]
-    B -->|Complex| E["📝 Queue"]
-    E --> F["⏳ Queue Worker"]
-    F --> G["🤖 Process Query"]
-    G --> H{"Response Method"}
+    A["📞 Voice Call"] --> B["🚀 Groq (5s)"]
+    B -->|Success| C["🔊 Response"]
+    B -->|Timeout| D["⏳ Retry (5s)"]
+    D -->|Success| E["🔊 'Sorry for wait...' + Response"]
+    D -->|Timeout| F["📝 Queue"]
+    F --> G["⚙️ Queue Worker"]
+    G --> H{"Response Channel"}
     H -->|gateway| I["🚪 Clawdbot"]
     H -->|telegram| J["📱 Telegram"]
     H -->|sms| K["💬 SMS"]
     H -->|webhook| L["🔗 Custom URL"]
 ```
 
-### Query Classification
+### Retry Logic
 
-**Simple queries (instant response):**
-- "What's your name?"
-- "What time is it?"
-- "Tell me about yourself"
+1. **First attempt (5s)**: Try to get response from Groq
+2. **If timeout**: Retry for 5 more seconds
+3. **If success on retry**: Respond with "Sorry for the wait..." + answer
+4. **If both timeout**: Queue for async processing, tell user "I'll send you the answer via text"
 
-**Complex queries (queued for Telegram):**
-- Weather: "What's the weather in Virginia?"
-- Tasks: "Run the research cron job"
-- Search: "Find news about Bitcoin"
-- Calendar: "What events do I have today?"
+This approach ensures fast queries get instant responses while slow queries gracefully fall back to async delivery.
+
+### Timeout-Based Fallback
+
+Instead of pre-classifying queries, the system uses **adaptive timeout**:
+
+| Attempt | Timeout | On Success | On Timeout |
+|---------|---------|------------|------------|
+| 1st | 5 seconds | Return response | Retry |
+| 2nd | 5 seconds | "Sorry for wait" + response | Queue for async |
+
+This approach is more reliable than pattern matching because:
+- Some "complex" queries might respond fast
+- Some "simple" queries might be slow
+- No false positives/negatives from regex patterns
 
 ### Configuration
 
