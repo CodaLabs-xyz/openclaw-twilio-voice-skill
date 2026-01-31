@@ -127,6 +127,55 @@ graph LR
     style G fill:#c8e6c9
 ```
 
+## 📋 Twilio Requirements
+
+### What You Need
+
+| Item | Description | Link |
+|------|-------------|------|
+| **Twilio Account** | Free to create, pay-as-you-go | [Sign Up](https://www.twilio.com/try-twilio) |
+| **Phone Number** | ~$1.15/month, receives calls | [Buy Number](https://console.twilio.com/us1/develop/phone-numbers/manage/incoming) |
+| **Account SID** | Found in console dashboard | [Console](https://console.twilio.com/) |
+| **Auth Token** | Found in console dashboard | [Console](https://console.twilio.com/) |
+
+### Setup Steps
+
+1. **Create Twilio Account**
+   - Go to https://www.twilio.com/try-twilio
+   - Verify email and phone number
+   - Free trial includes $15 credit
+
+2. **Get Account Credentials**
+   - Go to [Console Dashboard](https://console.twilio.com/)
+   - Copy **Account SID** (starts with `AC`)
+   - Copy **Auth Token** (click to reveal)
+
+3. **Buy a Phone Number**
+   - Go to [Phone Numbers → Buy a Number](https://console.twilio.com/us1/develop/phone-numbers/manage/incoming)
+   - Select country and capabilities (Voice)
+   - Cost: ~$1.15/month for US numbers
+
+4. **Configure Webhook**
+   - Go to [Phone Numbers → Manage → Active Numbers](https://console.twilio.com/us1/develop/phone-numbers/manage/incoming)
+   - Click your number
+   - Under "Voice Configuration":
+     - Set "A call comes in" to **Webhook**
+     - URL: `https://your-server.com/voice/incoming`
+     - Method: **POST**
+
+### Twilio Console Links
+
+| Resource | URL |
+|----------|-----|
+| Console Home | https://console.twilio.com/ |
+| Buy Phone Number | https://console.twilio.com/us1/develop/phone-numbers/manage/incoming |
+| Active Numbers | https://console.twilio.com/us1/develop/phone-numbers/manage/incoming |
+| Usage & Billing | https://console.twilio.com/us1/billing/manage-billing/billing-overview |
+| API Credentials | https://console.twilio.com/us1/account/keys-credentials/api-keys |
+| Call Logs | https://console.twilio.com/us1/monitor/logs/calls |
+
+---
+
 ## 🚀 Quick Start
 
 ### 1. Clone & Install
