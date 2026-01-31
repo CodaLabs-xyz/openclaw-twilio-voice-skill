@@ -1,0 +1,23 @@
+{
+  "name": "twilio-voice-skill",
+  "version": "0.1.0",
+  "description": "OpenClaw/Clawdbot skill for voice calls via Twilio with security verification",
+  "main": "scripts/webhook-server.js",
+  "scripts": {
+    "start": "node scripts/webhook-server.js",
+    "dev": "node --watch scripts/webhook-server.js"
+  },
+  "keywords": [
+    "twilio",
+    "voice",
+    "clawdbot",
+    "openclaw",
+    "skill",
+    "phone",
+    "ai-agent"
+  ],
+  "author": "PerkOS",
+  "license": "MIT",
+  "dependencies": {},
+  "devDependencies": {}
+}

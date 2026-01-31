@@ -1,0 +1,23 @@
+{
+  "allowedNumbers": [
+    {
+      "number": "+1234567890",
+      "pin": "1234",
+      "name": "Julio"
+    }
+  ],
+  "maxAttempts": 3,
+  "rateLimitPerHour": 5,
+  "ttsProvider": "elevenlabs",
+  "sttProvider": "groq",
+  "port": 3001,
+  "twilio": {
+    "accountSid": "ACxxxxxxxxxx",
+    "authToken": "your_auth_token",
+    "phoneNumber": "+1234567890"
+  },
+  "agent": {
+    "gatewayUrl": "http://localhost:18789",
+    "gatewayToken": "your_gateway_token"
+  }
+}
