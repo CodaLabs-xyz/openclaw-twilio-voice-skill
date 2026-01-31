@@ -5,6 +5,7 @@
   "main": "scripts/webhook-server.js",
   "scripts": {
     "start": "node scripts/webhook-server.js",
+    "start:media": "node scripts/webhook-server.js & node scripts/media-stream-handler.js",
     "dev": "node --watch scripts/webhook-server.js",
     "worker": "node scripts/queue-worker.js",
     "verify": "node scripts/verify-config.js",
@@ -21,6 +22,12 @@
   ],
   "author": "PerkOS",
   "license": "MIT",
-  "dependencies": {},
+  "dependencies": {
+    "@deepgram/sdk": "^3.0.0",
+    "ws": "^8.14.0"
+  },
+  "optionalDependencies": {
+    "@deepgram/sdk": "^3.0.0"
+  },
   "devDependencies": {}
 }

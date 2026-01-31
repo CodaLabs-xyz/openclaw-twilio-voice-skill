@@ -1,4 +1,28 @@
 {
+  "sttProvider": "twilio",
+  "stt": {
+    "twilio": {
+      "enabled": true,
+      "note": "Default, uses Twilio built-in STT (no extra cost)"
+    },
+    "deepgram": {
+      "enabled": false,
+      "apiKey": "your_deepgram_api_key",
+      "model": "nova-3",
+      "note": "Lowest latency (~150ms), requires Media Streams"
+    },
+    "groq": {
+      "enabled": false,
+      "apiKey": "your_groq_api_key",
+      "model": "whisper-large-v3-turbo",
+      "note": "Best accuracy, batch mode only"
+    }
+  },
+  "mediaStream": {
+    "enabled": false,
+    "port": 3002,
+    "wsUrl": "wss://your-domain.com/media-stream"
+  },
   "allowedNumbers": [
     {
       "number": "+1234567890",

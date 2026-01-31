@@ -111,6 +111,25 @@ See [references/twilio-api.md](references/twilio-api.md) for Twilio API details.
 - [ARCHITECTURE.md](ARCHITECTURE.md) - Design decisions and patterns
 - [docs/STT-COMPARISON.md](docs/STT-COMPARISON.md) - Deepgram vs Groq analysis
 
+## STT Providers
+
+The skill supports multiple Speech-to-Text providers:
+
+| Provider | Latency | Accuracy | Cost/min | Streaming |
+|----------|---------|----------|----------|-----------|
+| Twilio (default) | ~300ms | Good | Free | Via Gather |
+| Deepgram Nova-3 | ~150ms | Good | $0.0077 | WebSocket |
+| Groq Whisper | ~300ms | Best | $0.00067 | Batch |
+
+Configure in `voice-config.json`:
+```json
+{
+  "sttProvider": "twilio",  // or "deepgram" or "groq"
+}
+```
+
+See [docs/STT-COMPARISON.md](docs/STT-COMPARISON.md) for detailed comparison.
+
 ## Costs
 
 | Item | Cost |
@@ -119,6 +138,8 @@ See [references/twilio-api.md](references/twilio-api.md) for Twilio API details.
 | Inbound Minutes | ~$0.0085/min |
 | Outbound Minutes | ~$0.014/min |
 | TTS (ElevenLabs) | ~$0.30/1K chars |
-| STT (Groq) | Free tier |
+| STT (Twilio) | Free (included) |
+| STT (Deepgram) | ~$0.0077/min |
+| STT (Groq) | ~$0.00067/min |
 
-Estimated: **$5-15/month** for moderate use.
+Estimated: **$5-15/month** for moderate use (with Twilio STT).

@@ -211,5 +211,42 @@ const response = await fetch('https://api.groq.com/openai/v1/audio/transcription
 | Ultra-low latency needs | Deepgram Nova-3 | 150ms streaming |
 | Multi-language accuracy | Groq Whisper | Best WER for Spanish |
 
-**For now:** Keep current setup. Twilio STT for conversation, Groq for voice notes.
-**Future:** Add Deepgram option if latency becomes critical.
+---
+
+## Configuration
+
+The skill now supports all three providers. Configure in `voice-config.json`:
+
+```json
+{
+  "sttProvider": "twilio",  // "twilio" | "deepgram" | "groq"
+  "stt": {
+    "deepgram": {
+      "apiKey": "your_deepgram_api_key",
+      "model": "nova-3"
+    },
+    "groq": {
+      "apiKey": "your_groq_api_key",
+      "model": "whisper-large-v3-turbo"
+    }
+  },
+  "mediaStream": {
+    "enabled": false,
+    "port": 3002,
+    "wsUrl": "wss://your-domain.com/media-stream"
+  }
+}
+```
+
+### Using Deepgram (streaming)
+
+1. Set `"sttProvider": "deepgram"`
+2. Enable Media Streams: `"mediaStream": { "enabled": true }`
+3. Run both servers: `npm run start:media`
+4. Configure Twilio webhook to use `<Stream>` TwiML
+
+### Using Groq (batch)
+
+1. Set `"sttProvider": "groq"` 
+2. Works with standard `<Gather>` or `<Record>`
+3. Best for voice notes (already integrated)
