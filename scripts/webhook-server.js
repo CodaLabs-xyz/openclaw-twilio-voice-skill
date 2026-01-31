@@ -254,41 +254,99 @@ const routes = {
     const voiceConfig = config.voices || { es: 'Polly.Miguel', en: 'Polly.Matthew' };
     const vnConfig = config.voiceNotes || {};
     const saveDir = vnConfig.saveDir || './voice-notes';
+    const voice = voiceConfig['en'];
     
-    // Create voice note entry
-    const voiceNote = {
-      id: RecordingSid,
-      callSid: CallSid,
-      caller: callerNumber,
-      name: state.name,
-      recordingUrl: RecordingUrl,
-      duration: parseInt(RecordingDuration) || 0,
-      timestamp: new Date().toISOString(),
-      status: 'pending'
-    };
+    // Create timestamp-based filename
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const audioFile = `${timestamp}_${state.name || 'unknown'}.wav`;
+    const audioPath = path.join(saveDir, audioFile);
     
-    logCall('voice_note_saved', voiceNote);
+    logCall('voice_note_processing', { recordingSid: RecordingSid, name: state.name });
     
-    // Save voice note metadata to file
     try {
+      // Ensure directory exists
       if (!fs.existsSync(saveDir)) {
         fs.mkdirSync(saveDir, { recursive: true });
       }
       
+      // Download audio from Twilio (add .wav extension for format)
+      const twilioAuth = Buffer.from(`${config.twilio.accountSid}:${config.twilio.authToken}`).toString('base64');
+      const audioResponse = await fetch(`${RecordingUrl}.wav`, {
+        headers: { 'Authorization': `Basic ${twilioAuth}` }
+      });
+      
+      if (!audioResponse.ok) {
+        throw new Error(`Failed to download recording: ${audioResponse.status}`);
+      }
+      
+      const audioBuffer = Buffer.from(await audioResponse.arrayBuffer());
+      fs.writeFileSync(audioPath, audioBuffer);
+      logCall('voice_note_downloaded', { file: audioFile, size: audioBuffer.length });
+      
+      // Transcribe using Groq Whisper
+      let transcription = '';
+      const groqApiKey = process.env.GROQ_API_KEY;
+      
+      if (groqApiKey) {
+        const FormData = (await import('node:buffer')).FormData || globalThis.FormData;
+        const formData = new FormData();
+        formData.append('file', new Blob([audioBuffer]), audioFile);
+        formData.append('model', 'whisper-large-v3-turbo');
+        
+        const transcribeResponse = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${groqApiKey}` },
+          body: formData
+        });
+        
+        if (transcribeResponse.ok) {
+          const transcribeData = await transcribeResponse.json();
+          transcription = transcribeData.text || '';
+          logCall('voice_note_transcribed', { text: transcription.substring(0, 100) + '...' });
+        } else {
+          logCall('voice_note_transcribe_error', { status: transcribeResponse.status });
+        }
+      } else {
+        logCall('voice_note_no_groq_key', { message: 'GROQ_API_KEY not set, skipping transcription' });
+      }
+      
+      // Save voice note metadata
+      const voiceNote = {
+        id: RecordingSid,
+        callSid: CallSid,
+        caller: callerNumber,
+        name: state.name,
+        audioFile: audioFile,
+        transcription: transcription,
+        duration: parseInt(RecordingDuration) || 0,
+        timestamp: new Date().toISOString(),
+        status: transcription ? 'transcribed' : 'pending'
+      };
+      
       const notesFile = path.join(saveDir, 'notes.jsonl');
       fs.appendFileSync(notesFile, JSON.stringify(voiceNote) + '\n');
       
-      logCall('voice_note_written', { file: notesFile, id: RecordingSid });
+      // Also save transcription as separate text file for easy access
+      if (transcription) {
+        const textFile = audioFile.replace('.wav', '.txt');
+        fs.writeFileSync(path.join(saveDir, textFile), `[${state.name} - ${voiceNote.timestamp}]\n\n${transcription}\n`);
+      }
+      
+      logCall('voice_note_saved', { id: RecordingSid, audioFile, hasTranscription: !!transcription });
+      
+      return twiml(`
+        <Say voice="${voice}" language="en-US">Your voice note has been saved and transcribed. Thank you. Goodbye.</Say>
+        <Hangup/>
+      `);
+      
     } catch (error) {
       logCall('voice_note_error', { error: error.message });
+      
+      return twiml(`
+        <Say voice="${voice}" language="en-US">Your message was recorded but there was an error saving it. Please try again later. Goodbye.</Say>
+        <Hangup/>
+      `);
     }
-    
-    const voice = voiceConfig['en'];
-    
-    return twiml(`
-      <Say voice="${voice}" language="en-US">Your voice note has been saved and will be processed shortly. Thank you. Goodbye.</Say>
-      <Hangup/>
-    `);
   },
 
   'POST /voice/process-speech': async (req, body) => {
