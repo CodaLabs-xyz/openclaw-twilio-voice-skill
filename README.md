@@ -151,6 +151,25 @@ sequenceDiagram
     end
 ```
 
+## 🎯 Intentional Job Flow
+
+```mermaid
+sequenceDiagram
+    participant U as 📱 User
+    participant W as 🌐 Webhook
+    participant Q as 📋 Queue
+    participant C as 📱 Channel
+
+    U->>W: "Crea este job: analiza artículos"
+    W->>W: Detect job intent
+    W->>U: "Presiona 1 para confirmar, 2 para repetir"
+    U->>W: DTMF: 1
+    W->>Q: Queue job
+    W->>U: "Perfecto. Te envío cuando esté listo."
+    Note over Q: Queue Worker processes
+    Q->>C: Send result via configured channel
+```
+
 ## 🔐 Security Layers
 
 ```mermaid
@@ -490,6 +509,29 @@ This approach is more reliable than pattern matching because:
 - Some "complex" queries might respond fast
 - Some "simple" queries might be slow
 - No false positives/negatives from regex patterns
+
+### Intentional Job Creation
+
+Users can explicitly create async jobs with voice commands:
+
+**Trigger phrases (ES/EN):**
+- "Crea este job: ..." / "Create this job: ..."
+- "Agenda: ..." / "Schedule: ..."
+- "Cuando puedas, ..." / "When you can, ..."
+- "Envíame por telegram ..." / "Send me via telegram ..."
+
+**Flow:**
+```
+User: "Crea este job: analiza los últimos artículos y envíamelos"
+         ↓
+Winston: "Entendido. Quieres que analice los últimos artículos y te los envíe.
+          Presiona 1 para confirmar o 2 para repetir."
+         ↓
+    [1] → Queue job → "Perfecto. Te envío el resultado cuando esté listo."
+    [2] → "Por favor repite tu solicitud."
+```
+
+This allows users to intentionally delegate complex tasks during a voice call.
 
 ### Configuration
 

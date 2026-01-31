@@ -38,6 +38,28 @@ const rateLimits = new Map(); // phoneNumber -> { count, resetTime }
 // Queue for async processing
 const QUEUE_PATH = process.env.QUEUE_PATH || path.join(__dirname, '..', 'pending-queries.jsonl');
 
+// Detect if user wants to intentionally create a job/task
+const JOB_INTENT_PATTERNS = [
+  /^(crea|crear|create|make|haz|hazme)\s*(un|una|a|this)?\s*(job|tarea|task|trabajo)/i,
+  /^(agenda|schedule|programa|pon en cola|queue)/i,
+  /^(cuando puedas|when you can|más tarde|later).*(analiza|revisa|busca|encuentra|check|find|search|analyze)/i,
+  /(envía|envíame|send|mándame).*(telegram|whatsapp|texto|text|message)/i,
+];
+
+function isJobIntent(message) {
+  return JOB_INTENT_PATTERNS.some(pattern => pattern.test(message));
+}
+
+// Extract the actual task from a job request
+function extractJobTask(message) {
+  // Remove common prefixes
+  return message
+    .replace(/^(crea|crear|create|make|haz|hazme)\s*(un|una|a|this)?\s*(job|tarea|task|trabajo)[:\s]*/i, '')
+    .replace(/^(agenda|schedule|programa|pon en cola|queue)[:\s]*/i, '')
+    .replace(/^(cuando puedas|when you can|más tarde|later)[,:\s]*/i, '')
+    .trim();
+}
+
 // Queue query for async processing (will be sent via configured channel)
 function queueForAsyncProcessing(query) {
   try {
@@ -425,6 +447,33 @@ const routes = {
     
     logCall('speech_input', { callerNumber, speech, lang });
     
+    // Check for intentional job creation
+    if (isJobIntent(speech)) {
+      const taskDescription = extractJobTask(speech);
+      logCall('job_intent_detected', { task: taskDescription });
+      
+      // Store pending job in call state
+      state.pendingJob = {
+        task: taskDescription,
+        originalMessage: speech,
+        timestamp: new Date().toISOString()
+      };
+      
+      // Confirm with user
+      const confirmMsg = lang === 'es'
+        ? `Entendido. Quieres que ${taskDescription}. Presiona 1 para confirmar o 2 para repetir tu solicitud.`
+        : `Got it. You want me to ${taskDescription}. Press 1 to confirm or 2 to repeat your request.`;
+      
+      return twiml(`
+        <Say voice="${voice}" language="${langCode}">${escapeXml(confirmMsg)}</Say>
+        <Gather input="dtmf" numDigits="1" action="/voice/confirm-job" method="POST" timeout="10">
+          <Pause length="1"/>
+        </Gather>
+        <Say voice="${voice}" language="${langCode}">${lang === 'es' ? 'No recibí respuesta.' : 'No response received.'}</Say>
+        <Redirect method="POST">/voice/process-speech</Redirect>
+      `);
+    }
+    
     const agentResponse = await processWithAgent(speech, state);
     
     logCall('agent_response', { callerNumber, response: agentResponse });
@@ -448,6 +497,82 @@ const routes = {
       </Gather>
       <Say voice="${voice}" language="${langCode}">${lang === 'es' ? 'No escuché nada. Adiós.' : 'No input received. Goodbye.'}</Say>
       <Hangup/>
+    `);
+  },
+
+  'POST /voice/confirm-job': async (req, body) => {
+    const { Digits: digit, CallSid: callSid, From: callerNumber } = body;
+    const state = callState.get(callSid);
+    
+    if (!state) {
+      return twiml(`<Say voice="alice">Session error. Goodbye.</Say><Hangup/>`);
+    }
+    
+    const lang = state.lang || 'en';
+    const voiceConfig = config.voices || { es: 'Polly.Lupe', en: 'Polly.Joanna' };
+    const voice = voiceConfig[lang];
+    const langCode = lang === 'es' ? 'es-US' : 'en-US';
+    
+    logCall('job_confirmation', { digit, hasPendingJob: !!state.pendingJob });
+    
+    if (digit === '1' && state.pendingJob) {
+      // Confirmed - queue the job
+      const queued = queueForAsyncProcessing({
+        message: state.pendingJob.task,
+        lang: state.lang,
+        callerNumber: state.callerNumber,
+        callerName: state.name,
+        chatId: config.asyncResponse?.telegram?.chatId || config.telegram?.defaultChatId,
+        isIntentionalJob: true
+      });
+      
+      // Clear pending job
+      delete state.pendingJob;
+      
+      if (queued) {
+        logCall('job_queued', { task: state.pendingJob?.task });
+        const confirmMsg = lang === 'es'
+          ? 'Perfecto. He creado la tarea. Te envío el resultado cuando esté listo. ¿Algo más?'
+          : 'Perfect. I\'ve created the task. I\'ll send you the result when ready. Anything else?';
+        
+        return twiml(`
+          <Say voice="${voice}" language="${langCode}">${confirmMsg}</Say>
+          <Gather input="speech" speechTimeout="3" timeout="15" action="/voice/process-speech" method="POST" language="${langCode}">
+            <Pause length="1"/>
+          </Gather>
+          <Say voice="${voice}" language="${langCode}">${lang === 'es' ? 'No escuché nada. Adiós.' : 'No input received. Goodbye.'}</Say>
+          <Hangup/>
+        `);
+      }
+    }
+    
+    if (digit === '2') {
+      // Repeat - clear pending and ask again
+      delete state.pendingJob;
+      const repeatMsg = lang === 'es'
+        ? 'De acuerdo, por favor repite tu solicitud.'
+        : 'Okay, please repeat your request.';
+      
+      return twiml(`
+        <Say voice="${voice}" language="${langCode}">${repeatMsg}</Say>
+        <Gather input="speech" speechTimeout="3" timeout="15" action="/voice/process-speech" method="POST" language="${langCode}">
+          <Pause length="1"/>
+        </Gather>
+        <Say voice="${voice}" language="${langCode}">${lang === 'es' ? 'No escuché nada. Adiós.' : 'No input received. Goodbye.'}</Say>
+        <Hangup/>
+      `);
+    }
+    
+    // Invalid input
+    const invalidMsg = lang === 'es'
+      ? 'No entendí. Presiona 1 para confirmar o 2 para repetir.'
+      : 'I didn\'t understand. Press 1 to confirm or 2 to repeat.';
+    
+    return twiml(`
+      <Gather input="dtmf" numDigits="1" action="/voice/confirm-job" method="POST" timeout="10">
+        <Say voice="${voice}" language="${langCode}">${invalidMsg}</Say>
+      </Gather>
+      <Redirect method="POST">/voice/process-speech</Redirect>
     `);
   },
 
